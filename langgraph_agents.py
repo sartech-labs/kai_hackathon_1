@@ -17,10 +17,10 @@ load_dotenv()
 
 # Import LangChain and LangGraph
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema import BaseMessage, HumanMessage, AIMessage
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
-from langgraph.graph.graph import CompiledGraph
+# from langgraph.graph import CompiledGraph
 from typing import TypedDict, Annotated
 import operator
 
@@ -417,7 +417,7 @@ class LLMManagerAgent:
         # Initialize LangGraph
         self.graph = self._build_graph()
     
-    def _build_graph(self) -> CompiledGraph:
+    def _build_graph(self):
         """Build the LangGraph workflow"""
         workflow = StateGraph(LLMAgentState)
         
