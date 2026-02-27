@@ -200,7 +200,9 @@ export function VoiceAgentPanel({
                 }
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium text-foreground">
-                    Call ended -- Order {consensus?.approved ? "Approved" : "Rejected"}
+                    {consensus?.approved
+                      ? "Call ended -- Order Approved"
+                      : "Customer informed -- Order Rejected"}
                   </span>
                   {consensus?.approved && (
                     <span className="block text-xs text-muted-foreground mt-0.5">

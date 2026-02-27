@@ -23,6 +23,8 @@ export interface CallLog {
 
 interface AppState {
   phase: DemoPhase
+  backendSource: "unknown" | "backend" | "frontend-fallback"
+  backendMessage: string | null
   order: Order
   transcript: TranscriptMessage[]
   activeAgents: Set<AgentId>
@@ -37,6 +39,7 @@ interface AppState {
 
 type Action =
   | { type: "SET_PHASE"; phase: DemoPhase }
+  | { type: "SET_BACKEND_STATUS"; backendSource: "unknown" | "backend" | "frontend-fallback"; backendMessage?: string }
   | { type: "SET_ORDER"; order: Order }
   | { type: "ADD_TRANSCRIPT"; msg: TranscriptMessage }
   | { type: "SET_ACTIVE_AGENTS"; agents: Set<AgentId> }
@@ -50,6 +53,8 @@ type Action =
 
 const initialState: AppState = {
   phase: "idle",
+  backendSource: "unknown",
+  backendMessage: null,
   order: { ...DEFAULT_ORDER },
   transcript: [],
   activeAgents: new Set(),
@@ -66,6 +71,8 @@ function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "SET_PHASE":
       return { ...state, phase: action.phase }
+    case "SET_BACKEND_STATUS":
+      return { ...state, backendSource: action.backendSource, backendMessage: action.backendMessage ?? null }
     case "SET_ORDER":
       return { ...state, order: action.order }
     case "ADD_TRANSCRIPT": {
@@ -157,6 +164,19 @@ export default function SynkDemo() {
   const processSSEEvent = useCallback(
     (event: SSEEvent) => {
       switch (event.type) {
+        case "backend_status":
+          if (event.data.backendSource) {
+            dispatch({
+              type: "SET_BACKEND_STATUS",
+              backendSource: event.data.backendSource,
+              backendMessage: event.data.backendMessage,
+            })
+            if (event.data.backendSource === "frontend-fallback") {
+              addTranscript("agent", event.data.backendMessage || "Backend unavailable. Showing frontend dummy data.")
+            }
+          }
+          break
+
         case "phase_change":
           if (event.data.phase) {
             dispatch({ type: "SET_PHASE", phase: event.data.phase })
@@ -272,7 +292,11 @@ export default function SynkDemo() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
-      <SynkHeader phase={state.phase} />
+      <SynkHeader
+        phase={state.phase}
+        backendSource={state.backendSource}
+        backendMessage={state.backendMessage || undefined}
+      />
 
       <ResizablePanelGroup direction="horizontal" className="flex-1">
         {/* Left: Voice Agent */}

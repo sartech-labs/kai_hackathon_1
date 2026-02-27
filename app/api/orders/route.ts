@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server"
+﻿import { NextResponse } from "next/server"
 import type { Order } from "@/lib/synk/types"
 
 export async function POST(request: Request) {
@@ -6,8 +6,8 @@ export async function POST(request: Request) {
   const order: Order = {
     id: `ORD-RUSH-${String(Date.now()).slice(-3)}`,
     customer: body.customer || "Acme Corp",
-    product: body.product || "PROD-XYZ",
-    quantity: body.quantity || 5000,
+    product: body.product || "PMP-STD-100",
+    quantity: body.quantity || 50,
     requestedPrice: body.requestedPrice || 10.0,
     requestedDeliveryDays: body.requestedDeliveryDays || 18,
     priority: body.priority || "rush",
@@ -15,3 +15,4 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ success: true, order })
 }
+

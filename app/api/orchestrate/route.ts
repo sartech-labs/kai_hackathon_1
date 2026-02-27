@@ -11,7 +11,7 @@ function encode(event: SSEEvent): string {
 let msgId = 0
 function makeMsg(
   from: AgentId | "orchestrator",
-  to: AgentId | "all",
+  to: AgentId | "orchestrator" | "all",
   round: number,
   type: AgentMessage["type"],
   message: string
@@ -56,18 +56,8 @@ function getRoundMessages(round: number): AgentMessage[] {
   ]
 }
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const orderJson = searchParams.get("order")
-
-  if (!orderJson) {
-    return new Response("Missing order parameter", { status: 400 })
-  }
-
-  const order: Order = JSON.parse(decodeURIComponent(orderJson))
-  msgId = 0
-
-  const stream = new ReadableStream({
+function buildFallbackStream(order: Order, backendMessage?: string) {
+  return new ReadableStream({
     async start(controller) {
       const send = (event: SSEEvent) => {
         controller.enqueue(new TextEncoder().encode(encode(event)))
@@ -76,6 +66,14 @@ export async function GET(request: Request) {
       const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
       try {
+        send({
+          type: "backend_status",
+          data: {
+            backendSource: "frontend-fallback",
+            backendMessage: backendMessage || "Backend unavailable. Showing frontend dummy data.",
+          },
+        })
+
         // Phase: Order Broadcast
         send({ type: "phase_change", data: { phase: "order-broadcast" as DemoPhase } })
         await delay(1200)
@@ -152,18 +150,89 @@ export async function GET(request: Request) {
         send({ type: "phase_change", data: { phase: "done" as DemoPhase } })
         send({ type: "done", data: {} })
       } catch (err) {
-        console.error("[v0] SSE stream error:", err)
+        console.error("[v0] fallback SSE stream error:", err)
       } finally {
         controller.close()
       }
     },
   })
+}
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  })
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const orderJson = searchParams.get("order")
+
+  if (!orderJson) {
+    return new Response("Missing order parameter", { status: 400 })
+  }
+
+  const order: Order = JSON.parse(decodeURIComponent(orderJson))
+  msgId = 0
+
+  const backendBase = (process.env.BACKEND_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "")
+  const backendUrl = `${backendBase}/orchestrate?order=${encodeURIComponent(JSON.stringify(order))}`
+
+  try {
+    const backendResponse = await fetch(backendUrl, {
+      method: "GET",
+      headers: { Accept: "text/event-stream" },
+      cache: "no-store",
+    })
+
+    if (!backendResponse.ok || !backendResponse.body) {
+      throw new Error(`Backend returned ${backendResponse.status}`)
+    }
+
+    const backendStream = new ReadableStream({
+      async start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            encode({
+              type: "backend_status",
+              data: {
+                backendSource: "backend",
+                backendMessage: `Connected to ${backendBase}`,
+              },
+            })
+          )
+        )
+
+        const reader = backendResponse.body!.getReader()
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            if (value) controller.enqueue(value)
+          }
+        } catch (err) {
+          console.error("[v0] backend SSE proxy error:", err)
+        } finally {
+          controller.close()
+          reader.releaseLock()
+        }
+      },
+    })
+
+    return new Response(backendStream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    })
+  } catch (err) {
+    const message = err instanceof Error
+      ? `Backend unreachable (${backendBase}): ${err.message}. Showing frontend dummy data.`
+      : `Backend unreachable (${backendBase}). Showing frontend dummy data.`
+    console.warn("[v0] falling back to frontend orchestration:", message)
+
+    const fallbackStream = buildFallbackStream(order, message)
+    return new Response(fallbackStream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    })
+  }
 }

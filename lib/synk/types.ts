@@ -76,7 +76,7 @@ export interface ConsensusResult {
 export interface AgentMessage {
   id: string
   from: AgentId | "orchestrator"
-  to: AgentId | "all"
+  to: AgentId | "orchestrator" | "all"
   round: number
   type: "proposal" | "objection" | "counter" | "agreement" | "info" | "directive"
   message: string
@@ -85,6 +85,7 @@ export interface AgentMessage {
 
 // SSE event types
 export type SSEEventType =
+  | "backend_status"
   | "phase_change"
   | "agent_update"
   | "agent_message"
@@ -97,6 +98,8 @@ export type SSEEventType =
 export interface SSEEvent {
   type: SSEEventType
   data: {
+    backendSource?: "backend" | "frontend-fallback"
+    backendMessage?: string
     phase?: DemoPhase
     agentId?: AgentId
     proposal?: AgentProposal

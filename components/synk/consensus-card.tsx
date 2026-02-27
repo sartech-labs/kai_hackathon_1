@@ -1,9 +1,8 @@
-"use client"
+﻿"use client"
 
 import Image from "next/image"
-import type { ConsensusResult, Order } from "@/lib/synk/types"
+import type { AgentId, AgentProposal, ConsensusResult, Order } from "@/lib/synk/types"
 import { AGENT_CONFIGS } from "@/lib/synk/types"
-import type { AgentId } from "@/lib/synk/types"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, XCircle, Shield, TrendingUp } from "lucide-react"
 
@@ -18,16 +17,18 @@ const AGENT_AVATARS: Record<string, string> = {
 interface ConsensusCardProps {
   consensus: ConsensusResult
   order: Order
+  finalProposals?: AgentProposal[]
 }
 
-export function ConsensusCard({ consensus, order }: ConsensusCardProps) {
+export function ConsensusCard({ consensus, order, finalProposals = [] }: ConsensusCardProps) {
   const approved = consensus.approved
+  const proposalMap = new Map(finalProposals.map((proposal) => [proposal.agentId, proposal]))
+  const rejectedAgents = finalProposals.filter((proposal) => !proposal.approved)
 
   return (
     <div className={`rounded-2xl overflow-hidden bg-card border-2 shadow-xl animate-float-in ${
       approved ? "border-emerald-200 shadow-emerald-100/50" : "border-red-200 shadow-red-100/50"
     }`}>
-      {/* Header */}
       <div className={`flex items-center justify-between px-6 py-5 ${approved ? "bg-emerald-50" : "bg-red-50"}`}>
         <div className="flex items-center gap-3">
           {approved ? (
@@ -53,7 +54,6 @@ export function ConsensusCard({ consensus, order }: ConsensusCardProps) {
         </Badge>
       </div>
 
-      {/* Metrics */}
       <div className="px-6 py-5 grid grid-cols-3 gap-3">
         <MetricBox label="Final Price" value={`$${consensus.finalPrice.toFixed(2)}/unit`} color="#10b981" icon={<TrendingUp className="w-3.5 h-3.5" />} />
         <MetricBox label="Delivery" value={`${consensus.finalDeliveryDays} days`} color="#f59e0b" />
@@ -64,7 +64,6 @@ export function ConsensusCard({ consensus, order }: ConsensusCardProps) {
           color={consensus.riskScore === "Low" ? "#16a34a" : consensus.riskScore === "Medium" ? "#ca8a04" : "#dc2626"} />
       </div>
 
-      {/* Deal value */}
       <div className="mx-6 mb-4 flex items-center justify-between px-5 py-3.5 rounded-xl bg-secondary border border-border">
         <span className="text-sm font-medium text-muted-foreground">Total Deal Value</span>
         <span className="text-xl font-mono font-bold text-foreground">
@@ -72,26 +71,49 @@ export function ConsensusCard({ consensus, order }: ConsensusCardProps) {
         </span>
       </div>
 
-      {/* Agent approvals */}
       <div className="px-6 pb-4">
         <div className="flex items-center gap-2 mb-2.5">
           <Shield className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Agent Approvals</span>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Agent Decisions</span>
         </div>
         <div className="flex flex-wrap gap-2">
-          {AGENT_CONFIGS.map((agent) => (
-            <div key={agent.id} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-secondary border border-border">
-              <div className="w-6 h-6 rounded-full overflow-hidden">
-                <Image src={AGENT_AVATARS[agent.id as AgentId] || ""} alt={agent.name} width={24} height={24} className="object-cover w-full h-full" />
+          {AGENT_CONFIGS.map((agent) => {
+            const proposal = proposalMap.get(agent.id)
+            const agentApproved = proposal ? proposal.approved : approved
+            const statusLabel = proposal?.status ? proposal.status.toUpperCase() : agentApproved ? "AGREED" : "OBJECTING"
+
+            return (
+              <div
+                key={agent.id}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${
+                  agentApproved ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"
+                }`}
+              >
+                <div className="w-6 h-6 rounded-full overflow-hidden">
+                  <Image src={AGENT_AVATARS[agent.id as AgentId] || ""} alt={agent.name} width={24} height={24} className="object-cover w-full h-full" />
+                </div>
+                <span className="text-xs font-medium text-foreground">{agent.name}</span>
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                  agentApproved ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                }`}>
+                  {statusLabel}
+                </span>
+                {agentApproved ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                ) : (
+                  <XCircle className="w-3.5 h-3.5 text-red-500" />
+                )}
               </div>
-              <span className="text-xs font-medium text-foreground">{agent.name}</span>
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-            </div>
-          ))}
+            )
+          })}
         </div>
+        {!approved && rejectedAgents.length > 0 && (
+          <p className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            Rejected by: {rejectedAgents.map((proposal) => AGENT_CONFIGS.find((agent) => agent.id === proposal.agentId)?.name || proposal.agentId).join(", ")}
+          </p>
+        )}
       </div>
 
-      {/* Summary */}
       <div className="px-6 pb-5">
         <p className="text-sm text-muted-foreground leading-relaxed bg-secondary rounded-xl px-4 py-3 border border-border">
           {consensus.summary}

@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useRef, useEffect, useState, useMemo } from "react"
 import Image from "next/image"
@@ -14,7 +14,7 @@ import {
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
-// ─── Agent avatar map ──────────────────────────────────────────
+// â”€â”€â”€ Agent avatar map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const AGENT_AVATARS: Record<AgentId | "orchestrator", string> = {
   production: "/agents/production.jpg",
   finance: "/agents/finance.jpg",
@@ -24,7 +24,7 @@ const AGENT_AVATARS: Record<AgentId | "orchestrator", string> = {
   orchestrator: "/agents/orchestrator.jpg",
 }
 
-// ─── Step icons ────────────────────────────────────────────────
+// â”€â”€â”€ Step icons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const STEP_ICONS: Record<ActionStep["kind"], { Icon: React.ComponentType<{ className?: string }>; bg: string; fg: string; label: string }> = {
   tool_call:   { Icon: Terminal, bg: "bg-blue-50", fg: "text-blue-600", label: "TOOL" },
   tool_result: { Icon: Database, bg: "bg-emerald-50", fg: "text-emerald-600", label: "RESULT" },
@@ -34,7 +34,7 @@ const STEP_ICONS: Record<ActionStep["kind"], { Icon: React.ComponentType<{ class
   agreement:   { Icon: CheckCircle2, bg: "bg-emerald-50", fg: "text-emerald-600", label: "AGREED" },
 }
 
-// ─── Layout: agent positions as % of canvas ──────────────────
+// â”€â”€â”€ Layout: agent positions as % of canvas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Pentagon: Production top-center, Finance top-right, Sales top-left,
 // Logistics bottom-right, Procurement bottom-left
 interface AgentLayout {
@@ -53,7 +53,7 @@ const AGENT_LAYOUT: AgentLayout[] = [
 
 const ORCH_POS = { x: 50, y: 48 }
 
-// ─── Props ───────────────────────────────────────────────────
+// â”€â”€â”€ Props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface OrchestrationPanelProps {
   phase: DemoPhase
   activeAgents: Set<AgentId>
@@ -65,7 +65,7 @@ interface OrchestrationPanelProps {
   agentMessages: AgentMessage[]
 }
 
-// ─── Compact Callout ─────────────────────────────────────────
+// â”€â”€â”€ Compact Callout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // isLive=true: animate steps one by one (current round)
 // isLive=false: show collapsed tool icons, expand on click (past round)
 function AgentCallout({ proposal, color, isLive }: { proposal: AgentProposal | undefined; color: string; isLive: boolean }) {
@@ -90,7 +90,7 @@ function AgentCallout({ proposal, color, isLive }: { proposal: AgentProposal | u
   const statusBg = proposal.status === "agreed" ? "#dcfce7" : proposal.status === "objecting" ? "#fef2f2" : `${color}15`
   const statusFg = proposal.status === "agreed" ? "#16a34a" : proposal.status === "objecting" ? "#dc2626" : color
 
-  // ── Past round: collapsed icon row, expandable ──
+  // â”€â”€ Past round: collapsed icon row, expandable â”€â”€
   if (!isLive) {
     return (
       <div className="w-[180px] rounded-xl bg-card border border-border shadow-lg shadow-black/5 overflow-hidden animate-pop-in">
@@ -149,7 +149,7 @@ function AgentCallout({ proposal, color, isLive }: { proposal: AgentProposal | u
     )
   }
 
-  // ── Live round: animate steps ──
+  // â”€â”€ Live round: animate steps â”€â”€
   if (visibleStep < 0) return null
   const shownActions = proposal.actions.slice(Math.max(0, visibleStep - 1), visibleStep + 1)
 
@@ -199,7 +199,7 @@ function AgentCallout({ proposal, color, isLive }: { proposal: AgentProposal | u
   )
 }
 
-// ─── Main Panel ──────────────────────────────────────────────
+// â”€â”€â”€ Main Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function OrchestrationPanel({
   phase, activeAgents, proposals, allProposals,
@@ -342,7 +342,7 @@ export function OrchestrationPanel({
         {/* Consensus overlay -- shown when Final tab selected or auto at end */}
         {consensus && selectedRound === 0 && (
           <div className="absolute inset-0 z-30 bg-background/90 backdrop-blur-sm overflow-y-auto p-6">
-            <ConsensusCard consensus={consensus} order={order} />
+            <ConsensusCard consensus={consensus} order={order} finalProposals={rounds[rounds.length - 1]?.proposals || []} />
           </div>
         )}
 
@@ -533,3 +533,4 @@ export function OrchestrationPanel({
     </div>
   )
 }
+

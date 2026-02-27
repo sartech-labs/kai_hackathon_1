@@ -1,11 +1,10 @@
-// ─── Pre-scripted Demo Scenario ──────────────────────────────────────────
-import type { Order } from "./types"
+﻿import type { Order } from "./types"
 
 export const DEFAULT_ORDER: Order = {
   id: "ORD-RUSH-001",
   customer: "Acme Corp",
-  product: "PROD-XYZ",
-  quantity: 5000,
+  product: "PMP-STD-100",
+  quantity: 50,
   requestedPrice: 10.0,
   requestedDeliveryDays: 18,
   priority: "rush",
@@ -18,7 +17,7 @@ export const VOICE_SCRIPT = {
   },
   customerMessages: [
     "Hi, this is Sarah from Acme Corp procurement.",
-    "We need a rush order placed immediately -- 5,000 units of PROD-XYZ.",
+    "We need a rush order placed immediately -- 50 units of PMP-STD-100.",
     "We need delivery in 18 days max, and our target price is $10.00 per unit.",
     "This is for our Q3 product launch, so timing is critical.",
   ],
@@ -31,7 +30,7 @@ export const VOICE_SCRIPT = {
   callbackMessages: [
     "Hello Sarah, I have your order analysis ready.",
     "Great news -- we can fulfill your rush order with a slight adjustment.",
-    "We can deliver 5,000 units of PROD-XYZ at $10.80 per unit within 19 days.",
+    "We can deliver 50 units of PMP-STD-100 at $10.80 per unit within 19 days.",
     "This gives us a healthy margin while meeting your timeline with just one day of buffer.",
     "Our recommended shipping is ground freight, and materials are confirmed with ChemCorp Asia.",
     "Shall I confirm the order?",
@@ -43,3 +42,4 @@ export const VOICE_SCRIPT = {
     "I'd be happy to discuss alternative configurations that could work for both parties.",
   ],
 }
+

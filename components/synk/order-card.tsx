@@ -1,8 +1,10 @@
-"use client"
+﻿"use client"
 
 import type { Order } from "@/lib/synk/types"
 import { Badge } from "@/components/ui/badge"
 import { Package, Calendar, DollarSign, Hash } from "lucide-react"
+
+const PRODUCT_OPTIONS = ["PMP-STD-100", "PMP-HEAVY-200", "PMP-CHEM-300"] as const
 
 interface OrderCardProps {
   order: Order
@@ -67,17 +69,31 @@ export function OrderCard({ order, editable = false, onOrderChange }: OrderCardP
             <div className="flex flex-col min-w-0">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</span>
               {editable ? (
-                <input
-                  type={type}
-                  value={value}
-                  onChange={(e) =>
-                    handleChange(
-                      field,
-                      type === "number" ? parseFloat(e.target.value) || 0 : e.target.value
-                    )
-                  }
-                  className="bg-transparent text-sm font-mono text-foreground outline-none w-full border-b border-dashed border-muted-foreground/30 focus:border-primary"
-                />
+                field === "product" ? (
+                  <select
+                    value={String(value)}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                    className="bg-transparent text-sm font-mono text-foreground outline-none w-full border-b border-dashed border-muted-foreground/30 focus:border-primary"
+                  >
+                    {PRODUCT_OPTIONS.map((sku) => (
+                      <option key={sku} value={sku}>
+                        {sku}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={type}
+                    value={value}
+                    onChange={(e) =>
+                      handleChange(
+                        field,
+                        type === "number" ? parseFloat(e.target.value) || 0 : e.target.value
+                      )
+                    }
+                    className="bg-transparent text-sm font-mono text-foreground outline-none w-full border-b border-dashed border-muted-foreground/30 focus:border-primary"
+                  />
+                )
               ) : (
                 <span className="text-sm font-mono text-foreground">
                   {typeof value === "number" && field === "requestedPrice"
