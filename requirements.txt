@@ -1,8 +1,0 @@
-Flask
-werkzeug
-langgraph
-langchain
-langchain-openai
-openai
-python-dotenv
-pydantic
