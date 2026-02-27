@@ -125,7 +125,7 @@ def orchestrate():
             round_summary = apply_live_agent_results_to_round(round_summary, process_response)
             rounds.append(round_summary)
 
-            round_messages, message_counter = build_round_messages(round_number, message_counter)
+            round_messages, message_counter = build_round_messages(round_number, message_counter, round_summary)
             for message in round_messages:
                 yield sse_event('agent_message', {'agentMessage': message})
                 time.sleep(0.15)
@@ -147,6 +147,9 @@ def orchestrate():
 
             yield sse_event('round_complete', {'roundSummary': round_summary})
             time.sleep(0.25)
+
+            if round_summary.get('converged'):
+                break
 
         yield sse_event('phase_change', {'phase': 'consensus'})
         time.sleep(0.2)

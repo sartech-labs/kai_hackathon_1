@@ -345,13 +345,200 @@ def build_round_summary(order, round_number, previous_round=None):
         'overtimeHours': overtime_hours,
         'proposals': proposals,
         'converged': converged,
+        'order_context': order,
     }
 
 
-def _status_for_procurement(approved, round_number):
+def _proposal_status(approved, round_number, all_live_approved):
     if approved:
-        return 'agreed' if round_number >= 3 else 'proposing'
+        return 'agreed' if all_live_approved or round_number >= 2 else 'proposing'
     return 'objecting'
+
+
+def _short_reason(text, fallback='Agent analysis complete.'):
+    raw = str(text or '').strip()
+    if not raw:
+        return fallback
+    first_line = raw.splitlines()[0].strip()
+    if len(first_line) <= 160:
+        return first_line
+    return f"{first_line[:157].rstrip()}..."
+
+
+def _procurement_feasible_quantity(order, live_result):
+    requested_quantity = max(1, safe_int(order.get('quantity'), 1))
+    material_availability = live_result.get('material_availability') or {}
+    feasible_quantities = []
+
+    for item in material_availability.values():
+        required = safe_float(item.get('required'), 0)
+        available = safe_float(item.get('available'), 0)
+        if required <= 0:
+            continue
+        feasible_quantities.append(int((available * requested_quantity) / required))
+
+    if not feasible_quantities:
+        return requested_quantity
+    return max(0, min(requested_quantity, min(feasible_quantities)))
+
+
+def _build_round_specific_proposal(agent_id, live_result, round_number, order, quantity, price, delivery_days, margin, all_live_approved):
+    approved = bool(live_result.get('can_proceed', False))
+    requested_days = safe_int(order.get('requestedDeliveryDays'), delivery_days)
+    requested_price = safe_float(order.get('requestedPrice'), price)
+    metrics = {
+        'price': round(price, 2),
+        'deliveryDays': delivery_days,
+        'margin': round(margin, 1),
+        'quantity': quantity,
+    }
+    base_reason = live_result.get('reasoning') or live_result.get('llm_reasoning') or f'{agent_id} analysis completed.'
+    reasoning = _short_reason(base_reason)
+    stage_label = {1: 'initial_assessment', 2: 'counter_proposal', 3: 'final_position'}.get(round_number, 'assessment')
+    stage_detail = {
+        1: 'Initial feasibility review completed.',
+        2: 'Negotiation round opened to improve terms and resolve blockers.',
+        3: 'Final position prepared for consensus and customer callback.',
+    }.get(round_number, 'Assessment completed.')
+
+    if round_number == 2:
+        if agent_id == 'procurement':
+            feasible_quantity = _procurement_feasible_quantity(order, live_result)
+            if approved:
+                reasoning = f'Inventory is secured. Procurement confirms immediate reservation for {quantity} units.'
+            else:
+                metrics['quantity'] = feasible_quantity
+                metrics['deliveryDays'] = max(delivery_days, requested_days + 7)
+                reasoning = (
+                    f'Original request remains blocked by material shortage. Counter-proposal: release {feasible_quantity} units now '
+                    f'or replenish for full delivery in {metrics["deliveryDays"]} days.'
+                )
+        elif agent_id == 'production':
+            if approved:
+                metrics['deliveryDays'] = max(1, delivery_days - 1)
+                reasoning = f'Production can support the order and tighten factory completion to {metrics["deliveryDays"]} days.'
+            else:
+                metrics['deliveryDays'] = max(delivery_days, requested_days + 6)
+                reasoning = (
+                    f'Original deadline is not feasible. Counter-proposal: phased production over {metrics["deliveryDays"]} days '
+                    'with overtime and slot reallocation.'
+                )
+        elif agent_id == 'logistics':
+            if not all_live_approved:
+                metrics['deliveryDays'] = max(1, delivery_days - 1)
+                reasoning = f'Logistics can offset schedule risk with express routing and target {metrics["deliveryDays"]} days in transit.'
+            else:
+                reasoning = f'Logistics remains aligned on ground routing for a {metrics["deliveryDays"]}-day commitment.'
+        elif agent_id == 'finance':
+            revised_price = max(price, requested_price * (1.06 if (not approved or not all_live_approved) else 1.0))
+            metrics['price'] = round(revised_price, 2)
+            metrics['margin'] = round(max(margin, 18.0 if not approved else margin + 1.0), 1)
+            if approved:
+                reasoning = f'Finance supports a recovery plan at ${metrics["price"]:.2f}/unit with {metrics["margin"]:.1f}% margin.'
+            else:
+                reasoning = f'Original commercial terms remain below margin floor. Counter-offer: ${metrics["price"]:.2f}/unit.'
+        elif agent_id == 'sales':
+            if not all_live_approved:
+                metrics['deliveryDays'] = max(delivery_days, requested_days + 2)
+                reasoning = (
+                    f'Sales can take revised terms back to the customer at ${metrics["price"]:.2f}/unit '
+                    f'with {metrics["deliveryDays"]}-day delivery.'
+                )
+            else:
+                reasoning = f'Sales confirms the customer-facing offer at ${metrics["price"]:.2f}/unit.'
+    elif round_number == 3:
+        if agent_id == 'procurement':
+            feasible_quantity = _procurement_feasible_quantity(order, live_result)
+            if approved:
+                reasoning = f'Final procurement position: materials are fully reserved for {quantity} units.'
+            else:
+                metrics['quantity'] = feasible_quantity
+                metrics['deliveryDays'] = max(delivery_days, requested_days + 14)
+                reasoning = (
+                    f'Final procurement position: cannot approve {quantity} units from current stock. '
+                    f'Best immediate allocation is {feasible_quantity} units or full fulfillment in {metrics["deliveryDays"]} days.'
+                )
+        elif agent_id == 'production':
+            if approved:
+                reasoning = f'Final production position: factory schedule locked for {metrics["deliveryDays"]} days.'
+            else:
+                metrics['deliveryDays'] = max(delivery_days, requested_days + 10)
+                reasoning = f'Final production position: earliest reliable completion is {metrics["deliveryDays"]} days.'
+        elif agent_id == 'logistics':
+            reasoning = (
+                f'Final logistics position: {"air" if not all_live_approved else "ground"} routing can support '
+                f'the recommended {metrics["deliveryDays"]}-day schedule.'
+            )
+        elif agent_id == 'finance':
+            revised_price = max(metrics['price'], requested_price * (1.08 if not approved else 1.02))
+            metrics['price'] = round(revised_price, 2)
+            metrics['margin'] = round(max(metrics['margin'], 20.0 if not approved else metrics['margin']), 1)
+            reasoning = (
+                f'Final finance position: recommended commercial terms are ${metrics["price"]:.2f}/unit '
+                f'at {metrics["margin"]:.1f}% margin.'
+            )
+        elif agent_id == 'sales':
+            metrics['deliveryDays'] = max(metrics['deliveryDays'], requested_days if approved else requested_days + 2)
+            reasoning = (
+                f'Final sales position: communicate ${metrics["price"]:.2f}/unit and '
+                f'{metrics["deliveryDays"]}-day delivery to the customer.'
+            )
+
+    actions = [
+        {
+            'kind': 'tool_call',
+            'label': f'{agent_id}_{stage_label}()',
+            'detail': f'Round {round_number}: {stage_detail}',
+            'data': {
+                'round': round_number,
+                'decision_source': live_result.get('decision_source', 'llm'),
+            },
+        },
+        {
+            'kind': 'tool_result',
+            'label': f'{agent_id}_position',
+            'detail': (
+                f"Current position: ${metrics['price']:.2f}/unit, {metrics['deliveryDays']} delivery days, "
+                f"quantity {metrics['quantity']}."
+            ),
+            'data': {
+                'price': metrics['price'],
+                'delivery_days': metrics['deliveryDays'],
+                'quantity': metrics['quantity'],
+            },
+        },
+    ]
+
+    if round_number >= 2:
+        actions.append(
+            {
+                'kind': 'response',
+                'label': f'{agent_id}_negotiation_note',
+                'detail': reasoning,
+                'data': {
+                    'status': _proposal_status(approved, round_number, all_live_approved),
+                },
+            }
+        )
+
+    actions.append(
+        {
+            'kind': 'agreement' if approved else 'objection',
+            'label': f'{agent_id}_verdict',
+            'detail': reasoning,
+            'data': {
+                'can_proceed': approved,
+            },
+        }
+    )
+
+    return {
+        'status': _proposal_status(approved, round_number, all_live_approved),
+        'reasoning': reasoning,
+        'metrics': metrics,
+        'approved': approved,
+        'actions': actions,
+    }
 
 
 def apply_live_agent_results_to_round(round_summary, process_response):
@@ -368,6 +555,14 @@ def apply_live_agent_results_to_round(round_summary, process_response):
     proposals = list(round_summary.get('proposals') or [])
     all_live_approved = True
     live_found = False
+    round_number = safe_int(round_summary.get('round'), 1)
+
+    for proposal in proposals:
+        agent_id = proposal.get('agentId')
+        live_result = live_agent_responses.get(agent_id)
+        if isinstance(live_result, dict) and not bool(live_result.get('can_proceed', False)):
+            all_live_approved = False
+            break
 
     for index, proposal in enumerate(proposals):
         agent_id = proposal.get('agentId')
@@ -376,8 +571,6 @@ def apply_live_agent_results_to_round(round_summary, process_response):
             continue
 
         live_found = True
-        approved = bool(live_result.get('can_proceed', False))
-        round_number = safe_int(round_summary.get('round'), 1)
         quantity = safe_int(proposal.get('metrics', {}).get('quantity'), 0)
         delivery_days = safe_int(round_summary.get('deliveryDays'), 0)
         price = safe_float(proposal.get('metrics', {}).get('price'), 0)
@@ -398,49 +591,53 @@ def apply_live_agent_results_to_round(round_summary, process_response):
             if parsed_days is not None:
                 delivery_days = parsed_days
 
-        live_reason = live_result.get('reasoning') or live_result.get('llm_reasoning') or f'{agent_id} analysis completed.'
-        actions = [
-            {
-                'kind': 'tool_call',
-                'label': f'{agent_id}_live_analyze()',
-                'detail': f'Live {agent_id} analysis executed for round {round_number}.',
-                'data': {
-                    'decision_source': live_result.get('decision_source', 'llm'),
-                    'live': True,
-                },
-            },
-            {
-                'kind': 'agreement' if approved else 'objection',
-                'label': f'{agent_id}_verdict',
-                'detail': live_reason,
-                'data': {
-                    'can_proceed': approved,
-                },
-            },
-        ]
+        proposal_view = _build_round_specific_proposal(
+            agent_id=agent_id,
+            live_result=live_result,
+            round_number=round_number,
+            order=round_summary.get('order_context') or {},
+            quantity=quantity,
+            price=price,
+            delivery_days=delivery_days,
+            margin=margin,
+            all_live_approved=all_live_approved,
+        )
 
         proposals[index] = {
             'agentId': agent_id,
             'round': round_number,
-            'status': _status_for_procurement(approved, round_number),
-            'reasoning': live_reason,
-            'metrics': {
-                'price': price,
-                'deliveryDays': delivery_days,
-                'margin': margin,
-                'quantity': quantity,
-            },
-            'approved': approved,
-            'actions': actions,
+            'status': proposal_view['status'],
+            'reasoning': proposal_view['reasoning'],
+            'metrics': proposal_view['metrics'],
+            'approved': proposal_view['approved'],
+            'actions': proposal_view['actions'],
             'live': True,
         }
 
-        if not approved:
-            all_live_approved = False
-
     round_summary['proposals'] = proposals
-    if live_found and not all_live_approved:
-        round_summary['converged'] = False
+    if live_found:
+        finance_proposal = next((item for item in proposals if item.get('agentId') == 'finance'), None)
+        sales_proposal = next((item for item in proposals if item.get('agentId') == 'sales'), None)
+        production_proposal = next((item for item in proposals if item.get('agentId') == 'production'), None)
+        logistics_proposal = next((item for item in proposals if item.get('agentId') == 'logistics'), None)
+
+        if finance_proposal:
+            round_summary['margin'] = safe_float(finance_proposal.get('metrics', {}).get('margin'), round_summary.get('margin'))
+            round_summary['price'] = safe_float(finance_proposal.get('metrics', {}).get('price'), round_summary.get('price'))
+        if sales_proposal:
+            round_summary['price'] = safe_float(sales_proposal.get('metrics', {}).get('price'), round_summary.get('price'))
+        if production_proposal:
+            round_summary['deliveryDays'] = safe_int(production_proposal.get('metrics', {}).get('deliveryDays'), round_summary.get('deliveryDays'))
+        if logistics_proposal:
+            round_summary['deliveryDays'] = max(
+                safe_int(round_summary.get('deliveryDays'), 0),
+                safe_int(logistics_proposal.get('metrics', {}).get('deliveryDays'), 0),
+            )
+
+        round_summary['shippingMode'] = 'ground' if all_live_approved else ('express' if round_number == 2 else 'air')
+        round_summary['overtimeHours'] = 6 if all_live_approved else (10 if round_number == 2 else 12)
+        round_summary['converged'] = all_live_approved
+
     return round_summary
 
 
@@ -451,7 +648,7 @@ def extract_delivery_days_from_process_response(process_response):
     try:
         delivery_dt = datetime.strptime(delivery_date, '%Y-%m-%d').date()
         today = datetime.utcnow().date()
-        return max(1, (delivery_dt - today).days)
+        return min(60, max(1, (delivery_dt - today).days))
     except ValueError:
         return None
 
@@ -525,46 +722,45 @@ def sse_event(event_type, data):
     return f"data: {json.dumps({'type': event_type, 'data': data})}\n\n"
 
 
-def build_round_messages(round_number, id_counter):
-    templates = {
-        1: [
-            ('orchestrator', 'all', 'directive', 'Broadcasting rush order to all agents. Begin independent analysis.'),
-            ('production', 'orchestrator', 'proposal', 'Capacity check complete. Feasible with overtime allocation.'),
-            ('finance', 'orchestrator', 'objection', 'Margin below floor at initial price; requesting surcharge.'),
-            ('logistics', 'orchestrator', 'proposal', 'Ground mode selected; route and lead time are feasible.'),
-            ('procurement', 'orchestrator', 'info', 'Primary supplier confirms material availability.'),
-            ('sales', 'orchestrator', 'proposal', 'Strategic account constraints captured; negotiation buffer available.'),
-        ],
-        2: [
-            ('orchestrator', 'all', 'directive', 'Round 2 negotiation: finance/sales align pricing, production/logistics refine schedule.'),
-            ('finance', 'sales', 'proposal', 'Proposed revised price to satisfy margin threshold.'),
-            ('sales', 'finance', 'counter', 'Counter-offer issued to preserve customer relationship.'),
-            ('production', 'logistics', 'info', 'Adjusted production schedule lowers overtime burden.'),
-            ('procurement', 'orchestrator', 'agreement', 'Material reservation locked with supplier.'),
-        ],
-        3: [
-            ('orchestrator', 'all', 'directive', 'Round 3 final verification: confirm no blocking objections.'),
-            ('production', 'orchestrator', 'agreement', 'Production schedule locked and approved.'),
-            ('finance', 'orchestrator', 'agreement', 'Final margin check passed.'),
-            ('logistics', 'orchestrator', 'agreement', 'Carrier booking finalized.'),
-            ('procurement', 'orchestrator', 'agreement', 'Purchase order ready for execution.'),
-            ('sales', 'orchestrator', 'agreement', 'Customer-ready terms finalized.'),
-        ],
-    }
+def build_round_messages(round_number, id_counter, round_summary=None):
+    if not round_summary or not round_summary.get('proposals'):
+        return [], id_counter
+
+    blockers = [proposal for proposal in round_summary.get('proposals', []) if not proposal.get('approved')]
+    if round_number == 1:
+        directive = 'Broadcasting order to all agents. Complete initial feasibility checks.'
+    elif blockers:
+        directive = 'Blocking agents must counter with feasible terms. Supporting agents validate revised options.'
+    else:
+        directive = 'All agents are aligned. Finalize consensus and customer-ready terms.'
 
     messages = []
     timestamp = int(time.time() * 1000)
-    for from_agent, to_agent, msg_type, message in templates.get(round_number, []):
+
+    id_counter += 1
+    messages.append({
+        'id': f'msg-{id_counter}',
+        'from': 'orchestrator',
+        'to': 'all',
+        'round': round_number,
+        'type': 'directive',
+        'message': directive,
+        'timestamp': timestamp + id_counter,
+    })
+
+    for proposal in round_summary.get('proposals', []):
         id_counter += 1
+        message_type = 'agreement' if proposal.get('approved') and proposal.get('status') == 'agreed' else ('objection' if not proposal.get('approved') else 'proposal')
         messages.append({
             'id': f'msg-{id_counter}',
-            'from': from_agent,
-            'to': to_agent,
+            'from': proposal.get('agentId'),
+            'to': 'orchestrator',
             'round': round_number,
-            'type': msg_type,
-            'message': message,
+            'type': message_type,
+            'message': _short_reason(proposal.get('reasoning'), 'Position updated.'),
             'timestamp': timestamp + id_counter,
         })
+
     return messages, id_counter
 
 
