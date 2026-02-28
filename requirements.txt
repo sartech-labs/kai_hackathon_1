@@ -7,3 +7,7 @@ langchain-openai>=0.2.0
 openai>=1.40.0
 python-dotenv==1.0.0
 pydantic>=2.5.0
+websocket-client>=1.8.0
+Flask
+werkzeug
+vapi-server-sdk

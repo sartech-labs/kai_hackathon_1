@@ -5,6 +5,7 @@ from urllib.parse import unquote
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from .. import state
+from outbound_call_agent import trigger_decision_callback
 from ..services import (
     build_actual_round_summary,
     build_process_payload_from_order,
@@ -183,6 +184,36 @@ def orchestrate():
         yield sse_event('phase_change', {'phase': 'callback'})
         yield sse_event('callback_start', {'message': f"Calling back {order.get('customer', 'customer')}..."})
         time.sleep(0.2)
+
+        callback_number = (
+            order_payload.get('customerNumber')
+            or order_payload.get('customer_number')
+            or order_payload.get('phoneNumber')
+            or order_payload.get('phone_number')
+        )
+        try:
+            callback_result = trigger_decision_callback(final_order or order, consensus_payload, customer_number=callback_number)
+            callback_target = ((callback_result.get('customer') or {}).get('number')) or callback_number or 'customer number on file'
+            yield sse_event(
+                'callback_message',
+                {
+                    'message': f'Real Vapi callback placed to {callback_target}.',
+                    'call': {
+                        'id': callback_result.get('id'),
+                        'status': callback_result.get('status'),
+                    },
+                },
+            )
+            time.sleep(0.2)
+        except Exception as callback_err:
+            state.logger.error('/api/orchestrate callback trigger failed: %s', callback_err)
+            yield sse_event(
+                'callback_message',
+                {
+                    'message': f'Failed to place real callback call: {str(callback_err)}',
+                },
+            )
+            time.sleep(0.2)
 
         if consensus_payload['approved']:
             callback_messages = [
