@@ -49,6 +49,19 @@ export function VoiceAgentPanel({
   const isProcessing = ["order-broadcast", "round-1", "round-2", "round-3", "consensus"].includes(phase)
   const isCallback = phase === "callback"
   const isDone = phase === "done"
+  const showVoiceBand = phase !== "idle" && !isDone
+  const showOrderSummary = phase !== "idle"
+  const isOrderEditable = phase === "active-call"
+  const displayCustomer = order.customer || "Awaiting capture"
+  const orderStatusText =
+    voiceStatusMessage ||
+    (isProcessing
+      ? "Order submitted to agent network. Keeping the captured details visible during orchestration."
+      : isCallback
+        ? "Decision callback in progress. Order details remain available for reference."
+        : isDone
+          ? "Run complete. Final order details are shown below."
+          : "Waiting for outbound voice result.")
 
   return (
     <div className="flex flex-col h-full bg-card relative">
@@ -125,14 +138,14 @@ export function VoiceAgentPanel({
 
         {(isCallActive || isProcessing) && !isDone && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            {(isCallActive || isCallback) && (
+            {showVoiceBand && (
               <div className="px-5 py-3 border-b border-border bg-secondary/30">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                    {isCallback ? "Calling back" : "System active"} -- {order.customer}
+                    {isCallback ? "Calling back" : "System active"} -- {displayCustomer}
                   </span>
                 </div>
-                <VoiceWaveform active={isCallActive} />
+                <VoiceWaveform active={isCallActive || isProcessing} />
               </div>
             )}
 
@@ -152,43 +165,47 @@ export function VoiceAgentPanel({
               </div>
             )}
 
-            {phase === "active-call" && (
+            {showOrderSummary && (
               <div className="px-5 py-3 border-b border-border">
-                <OrderCard order={order} editable onOrderChange={onOrderChange} />
+                <OrderCard order={order} editable={isOrderEditable} onOrderChange={isOrderEditable ? onOrderChange : undefined} />
                 <div className="mt-3 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-                  {voiceStatusMessage || (voiceOrderReady ? "Order is ready for submission." : "Waiting for outbound voice result.")}
+                  {orderStatusText}
                 </div>
-                <div className="mt-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-                  {liveAudioStatus || "Live conversation audio not connected yet."}
-                </div>
-                <div className="mt-3 flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-full text-xs"
-                    onClick={() => onOrderChange({ ...DEFAULT_ORDER })}
-                  >
-                    Rejected Example
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-full text-xs"
-                    onClick={() => onOrderChange({ ...APPROVED_ORDER_EXAMPLE })}
-                  >
-                    Approved Example
-                  </Button>
-                </div>
-                <Button
-                  onClick={onSubmitOrder}
-                  disabled={!voiceOrderReady}
-                  className="w-full mt-3 rounded-full font-medium"
-                  size="sm"
-                >
-                  {voiceOrderReady ? "Submit to Agent Network" : "Awaiting Voice Result"}
-                </Button>
+                {phase === "active-call" && (
+                  <>
+                    <div className="mt-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+                      {liveAudioStatus || "Live conversation audio not connected yet."}
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full text-xs"
+                        onClick={() => onOrderChange({ ...DEFAULT_ORDER })}
+                      >
+                        Rejected Example
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full text-xs"
+                        onClick={() => onOrderChange({ ...APPROVED_ORDER_EXAMPLE })}
+                      >
+                        Approved Example
+                      </Button>
+                    </div>
+                    <Button
+                      onClick={onSubmitOrder}
+                      disabled={!voiceOrderReady}
+                      className="w-full mt-3 rounded-full font-medium"
+                      size="sm"
+                    >
+                      {voiceOrderReady ? "Submit to Agent Network" : "Awaiting Voice Result"}
+                    </Button>
+                  </>
+                )}
               </div>
             )}
 
@@ -200,6 +217,13 @@ export function VoiceAgentPanel({
 
         {isDone && (
           <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-border">
+              <OrderCard order={order} />
+              <div className="mt-3 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+                {orderStatusText}
+              </div>
+            </div>
+
             <div className="px-5 py-4 border-b border-border">
               <div className={`flex items-center gap-2.5 px-4 py-3 rounded-xl ${
                 consensus?.approved ? "bg-emerald-50 border border-emerald-200" : "bg-red-50 border border-red-200"

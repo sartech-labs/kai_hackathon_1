@@ -19,6 +19,16 @@ import { VoiceAgentPanel } from "@/components/synk/voice-agent-panel"
 import { OrchestrationPanel } from "@/components/synk/orchestration-panel"
 import type { TranscriptMessage } from "@/components/synk/voice-transcript"
 
+const EMPTY_ORDER: Order = {
+  id: "",
+  customer: "",
+  product: "",
+  quantity: 0,
+  requestedPrice: 0,
+  requestedDeliveryDays: 0,
+  priority: "rush",
+}
+
 export interface CallLog {
   id: string
   customer: string
@@ -368,9 +378,10 @@ export default function SynkDemo() {
 
   const handleStartSystem = useCallback(async () => {
     dispatch({ type: "RESET" })
-    currentOrderRef.current = { ...DEFAULT_ORDER }
+    currentOrderRef.current = { ...EMPTY_ORDER }
     clearAutoSubmit()
     stopLiveAudio()
+    dispatch({ type: "SET_ORDER", order: { ...EMPTY_ORDER } })
     dispatch({ type: "SET_PHASE", phase: "active-call" })
     dispatch({
       type: "SET_VOICE_STATUS",

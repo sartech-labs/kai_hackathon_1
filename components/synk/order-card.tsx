@@ -19,6 +19,22 @@ export function OrderCard({ order, editable = false, onOrderChange }: OrderCardP
     }
   }
 
+  const formatReadOnlyValue = (field: keyof Order, value: string | number) => {
+    if ((typeof value === "string" && value.trim() === "") || (typeof value === "number" && value === 0)) {
+      return "--"
+    }
+
+    if (typeof value === "number" && field === "requestedPrice") {
+      return `$${value.toFixed(2)}`
+    }
+
+    if (typeof value === "number") {
+      return value.toLocaleString()
+    }
+
+    return value
+  }
+
   const fields = [
     {
       icon: Package,
@@ -54,12 +70,12 @@ export function OrderCard({ order, editable = false, onOrderChange }: OrderCardP
     <div className="rounded-xl border border-border bg-card p-4 animate-float-in shadow-sm">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-muted-foreground">{order.id}</span>
+          <span className="text-xs font-mono text-muted-foreground">{order.id || "Awaiting capture"}</span>
           <Badge variant="outline" className="text-[10px] border-[var(--agent-sales)] text-[var(--agent-sales)]">
             {order.priority.toUpperCase()}
           </Badge>
         </div>
-        <span className="text-xs text-muted-foreground">{order.customer}</span>
+        <span className="text-xs text-muted-foreground">{order.customer || "Awaiting customer"}</span>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -75,6 +91,7 @@ export function OrderCard({ order, editable = false, onOrderChange }: OrderCardP
                     onChange={(e) => handleChange(field, e.target.value)}
                     className="bg-transparent text-sm font-mono text-foreground outline-none w-full border-b border-dashed border-muted-foreground/30 focus:border-primary"
                   >
+                    <option value="">Select product</option>
                     {PRODUCT_OPTIONS.map((sku) => (
                       <option key={sku} value={sku}>
                         {sku}
@@ -84,7 +101,7 @@ export function OrderCard({ order, editable = false, onOrderChange }: OrderCardP
                 ) : (
                   <input
                     type={type}
-                    value={value}
+                    value={typeof value === "number" && value === 0 ? "" : value}
                     onChange={(e) =>
                       handleChange(
                         field,
@@ -92,15 +109,12 @@ export function OrderCard({ order, editable = false, onOrderChange }: OrderCardP
                       )
                     }
                     className="bg-transparent text-sm font-mono text-foreground outline-none w-full border-b border-dashed border-muted-foreground/30 focus:border-primary"
+                    placeholder={field === "quantity" ? "Enter quantity" : field === "requestedPrice" ? "Enter price" : "Enter days"}
                   />
                 )
               ) : (
                 <span className="text-sm font-mono text-foreground">
-                  {typeof value === "number" && field === "requestedPrice"
-                    ? `$${value.toFixed(2)}`
-                    : typeof value === "number"
-                      ? value.toLocaleString()
-                      : value}
+                  {formatReadOnlyValue(field, value)}
                 </span>
               )}
             </div>
