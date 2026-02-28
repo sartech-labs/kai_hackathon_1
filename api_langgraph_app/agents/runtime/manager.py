@@ -192,6 +192,7 @@ class LLMManagerAgent:
                 'requested_delivery_days': request.requested_delivery_days,
                 'customer': request.customer,
                 'priority': request.priority,
+                'negotiation_context': request.negotiation_context or {},
             },
             'inventory': self.inventory_manager.inventory,
             'materials': self.inventory_manager.materials,
@@ -222,18 +223,29 @@ class LLMManagerAgent:
             total_deal_value = round(float(finance_data.get('total_deal_value') or 0), 2)
 
         if not state['all_can_proceed']:
+            agent_responses = {
+                'procurement': procurement_data,
+                'production': production_data,
+                'logistics': logistics_data,
+                'finance': finance_data,
+                'sales': sales_data,
+            }
+            rejection_reason = 'Order cannot be processed. Consensus not reached.'
+            for agent_id in ['procurement', 'production', 'logistics', 'finance', 'sales']:
+                agent_response = agent_responses.get(agent_id) or {}
+                if not agent_response.get('can_proceed', False):
+                    rejection_reason = agent_response.get('reasoning') or rejection_reason
+                    break
+
             return {
                 'status': 'FAILURE',
                 'order_id': request.order_id,
-                'message': 'Order cannot be processed. Consensus not reached.',
+                'product_sku': request.product_sku,
+                'quantity': request.quantity,
+                'customer_location': request.customer_location,
+                'message': rejection_reason,
                 'consensus_reached': False,
-                'agent_responses': {
-                    'procurement': procurement_data,
-                    'production': production_data,
-                    'logistics': logistics_data,
-                    'finance': finance_data,
-                    'sales': sales_data,
-                },
+                'agent_responses': agent_responses,
                 'timestamp': datetime.now().isoformat(),
             }
 

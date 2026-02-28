@@ -61,6 +61,18 @@ class InventoryManager:
                 ],
             },
         )
+        self.supplier_catalog = self._load_optional_json(
+            os.path.join(data_dir, 'suppliers.json'),
+            {'suppliers': {}},
+        )
+        self.factory_schedule = self._load_optional_json(
+            os.path.join(data_dir, 'factory.json'),
+            {'lines': [], 'strategy_profiles': {}},
+        )
+        self.carrier_network = self._load_optional_json(
+            os.path.join(data_dir, 'carriers.json'),
+            {'origin': 'Plant-01', 'carrier_networks': {}},
+        )
         self.sales_policy = self._load_optional_json(
             os.path.join(data_dir, 'sales.json'),
             {

@@ -1,18 +1,30 @@
 import json
 import logging
-import re
 from datetime import datetime, timedelta
 from typing import Dict, TYPE_CHECKING
 
-from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel
+
+from ..tool_calling import run_prebuilt_tool_agent
+from .tools import book_carrier, evaluate_shipping_modes, get_langchain_tools
 
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..runtime.inventory import InventoryManager
+
+
+class LogisticsAgentOutput(BaseModel):
+    can_proceed: bool | str = True
+    location_type: str = 'unknown'
+    shipping_mode: str = 'ground'
+    shipping_cost: float | str = 0.0
+    delivery_date: str = ''
+    reasoning: str = ''
+    confidence: float | str = 0.8
 
 
 class LLMLogisticsAgent:
@@ -41,14 +53,14 @@ Order Details:
 - Material Cost: {material_cost}
 - Planned Production Days: {production_days}
 
-Provide your analysis in JSON format with keys: location_type, shipping_cost, delivery_date, reasoning, confidence
+Provide your analysis in JSON format with keys: can_proceed, location_type, shipping_mode, shipping_cost, delivery_date, reasoning, confidence
 """
         )
 
     def invoke(self, order: dict, material_cost: float, production_days: int) -> Dict:
         logger.info('[%s] Calculating logistics for %s', self.name, order['customer_location'])
 
-        prompt_value = self.prompt.format(
+        user_prompt = self.prompt.format(
             product_sku=order['product_sku'],
             quantity=order['quantity'],
             customer_location=order['customer_location'],
@@ -58,11 +70,23 @@ Provide your analysis in JSON format with keys: location_type, shipping_cost, de
         )
 
         try:
-            response = self.llm.invoke([HumanMessage(content=prompt_value)])
-            response_text = response.content
+            agent_run = run_prebuilt_tool_agent(
+                llm=self.llm,
+                system_prompt=(
+                    'You are a Logistics Agent. Use logistics tools to compare shipping modes, '
+                    'check route clearance, and book the best feasible carrier.'
+                ),
+                user_prompt=user_prompt,
+                tools=get_langchain_tools(self.inventory_manager, order, production_days),
+                response_schema=LogisticsAgentOutput,
+                agent_name='logistics_agent',
+            )
+            response_text = agent_run['response_text']
             logger.info('[%s] Analysis: %s...', self.name, response_text[:200])
 
-            analysis = self._extract_json_or_parse(response_text, order, production_days)
+            fallback = self._fallback(order, production_days, agent_run.get('tool_results') or {})
+            analysis = dict(fallback)
+            analysis.update(agent_run.get('structured_response') or {})
             delivery_date = self._sanitize_delivery_date(
                 analysis.get('delivery_date'),
                 order.get('priority'),
@@ -70,14 +94,21 @@ Provide your analysis in JSON format with keys: location_type, shipping_cost, de
             )
             return {
                 'agent': self.name,
-                'can_proceed': True,
-                'location_type': analysis.get('location_type', 'unknown'),
-                'shipping_mode': analysis.get('shipping_mode', self.inventory_manager.logistics_policy.get('default_mode', 'ground')),
-                'shipping_cost': float(analysis.get('shipping_cost', 50)),
-                'delivery_date': delivery_date,
-                'reasoning': analysis.get('reasoning', response_text),
+                'can_proceed': bool(fallback.get('can_proceed', True)),
+                'location_type': analysis.get('location_type', fallback.get('location_type', 'unknown')),
+                'shipping_mode': analysis.get(
+                    'shipping_mode',
+                    fallback.get('shipping_mode', self.inventory_manager.logistics_policy.get('default_mode', 'ground')),
+                ),
+                'shipping_cost': float(fallback.get('shipping_cost', analysis.get('shipping_cost', 50))),
+                'delivery_date': fallback.get('delivery_date', delivery_date),
+                'reasoning': analysis.get('reasoning', response_text) if fallback.get('can_proceed', True) else fallback.get('reasoning', response_text),
+                'llm_reasoning': analysis.get('reasoning', response_text),
                 'analysis': response_text,
-                'confidence': float(analysis.get('confidence', 0.8)),
+                'confidence': self._as_float(analysis.get('confidence'), float(fallback.get('confidence', 0.8))),
+                'tool_results': fallback.get('tool_results', {}),
+                'used_tools': agent_run.get('used_tools', []),
+                'decision_source': 'deterministic_logistics',
             }
         except Exception as exc:
             logger.error('[%s] Error: %s', self.name, str(exc))
@@ -92,53 +123,49 @@ Provide your analysis in JSON format with keys: location_type, shipping_cost, de
                 'reasoning': f'Error in analysis: {str(exc)}',
                 'analysis': str(exc),
                 'confidence': float(fallback.get('confidence', 0.5)),
+                'tool_results': fallback.get('tool_results', {}),
+                'decision_source': 'deterministic_logistics',
             }
 
-    def _extract_json_or_parse(self, response_text: str, order: dict, production_days: int) -> Dict:
-        match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group())
-            except json.JSONDecodeError:
-                pass
-        return self._parse_analysis(response_text, order, production_days)
-
-    def _parse_analysis(self, text: str, order: dict, production_days: int) -> Dict:
-        fallback = self._fallback(order, production_days)
-        fallback['reasoning'] = text
-        return fallback
-
-    def _fallback(self, order: dict, production_days: int) -> Dict:
-        quantity = int(order.get('quantity') or 0)
+    def _fallback(self, order: dict, production_days: int, tool_results: Dict | None = None) -> Dict:
         requested_days = int(order.get('requested_delivery_days') or 18)
         location_profile = self.inventory_manager.get_location_profile(order.get('customer_location'))
         location_type = location_profile.get('type', 'national')
+        tool_results = dict(tool_results or {})
 
-        shipping_modes = self.inventory_manager.logistics_policy.get('shipping_modes', {})
-        default_mode = self.inventory_manager.logistics_policy.get('default_mode', 'ground')
-        mode = default_mode
-        if requested_days <= production_days + 1 and 'air' in shipping_modes:
-            mode = 'air'
-        elif requested_days <= production_days + 3 and 'express' in shipping_modes:
-            mode = 'express'
+        mode_result = tool_results.get('evaluate_shipping_modes')
+        if isinstance(mode_result, list):
+            mode_result = mode_result[-1] if mode_result else None
+        if not mode_result:
+            mode_result = evaluate_shipping_modes(self.inventory_manager, order, production_days)
+            tool_results['evaluate_shipping_modes'] = mode_result
 
-        mode_cfg = shipping_modes.get(mode, shipping_modes.get(default_mode, {'cost_per_unit': 0.3, 'transit_days': 5}))
-        transit_days = int(mode_cfg.get('transit_days', 5))
-        shipping_cost = round(float(mode_cfg.get('cost_per_unit', 0.3)) * quantity, 2)
-        total_days = max(1, production_days + transit_days)
-        delivery_date = (datetime.utcnow().date() + timedelta(days=total_days)).strftime('%Y-%m-%d')
+        recommended = mode_result.get('recommended') or {}
+        mode = recommended.get('mode', self.inventory_manager.logistics_policy.get('default_mode', 'ground'))
+        booking = tool_results.get('book_carrier')
+        if isinstance(booking, list):
+            booking = next((item for item in booking if item.get('mode') == mode), booking[-1] if booking else None)
+        if not booking:
+            booking = book_carrier(self.inventory_manager, mode_result, order, production_days)
+            tool_results['book_carrier'] = booking
+
+        total_days = int(recommended.get('total_days') or (production_days + 5))
+        shipping_cost = float(booking.get('shipping_cost') or recommended.get('shipping_cost') or 0.0)
+        delivery_date = booking.get('delivery_date') or (datetime.utcnow().date() + timedelta(days=total_days)).strftime('%Y-%m-%d')
+        can_proceed = bool(recommended.get('meets_schedule', total_days <= requested_days))
 
         return {
-            'can_proceed': True,
+            'can_proceed': can_proceed,
             'location_type': location_type,
             'shipping_mode': mode,
             'shipping_cost': shipping_cost,
             'delivery_date': delivery_date,
             'reasoning': (
                 f'Fallback logistics selected {mode} for {location_type} delivery. '
-                f'Transit {transit_days}d after production.'
+                f'Total lead time is {total_days} days.'
             ),
-            'confidence': 0.8,
+            'confidence': 0.8 if can_proceed else 0.62,
+            'tool_results': tool_results,
         }
 
     def _default_delivery_date(self, priority: str = 'normal', production_days: int = 10) -> str:
@@ -154,3 +181,17 @@ Provide your analysis in JSON format with keys: location_type, shipping_cost, de
             except ValueError:
                 pass
         return self._default_delivery_date(priority, production_days)
+
+    def _as_float(self, value, default: float) -> float:
+        if value is None:
+            return default
+        if isinstance(value, (int, float)):
+            return float(value)
+        raw = str(value).strip().lower().replace('%', '').replace('$', '').replace(',', '')
+        named = {'low': 0.55, 'medium': 0.72, 'high': 0.88}
+        if raw in named:
+            return named[raw]
+        try:
+            return float(raw)
+        except ValueError:
+            return default

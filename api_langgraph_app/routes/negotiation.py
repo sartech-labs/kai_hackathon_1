@@ -6,10 +6,12 @@ from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from .. import state
 from ..services import (
-    apply_live_agent_results_to_round,
+    build_actual_round_summary,
+    build_process_payload_from_order,
     build_round_messages,
     build_round_summary,
     build_synk_order,
+    derive_revised_order,
     get_agent_processing_delay,
     run_process_order_for_synk,
     safe_int,
@@ -99,31 +101,48 @@ def orchestrate():
 
     order = build_synk_order(order_payload)
 
-    try:
-        process_response, process_warning = run_process_order_for_synk(order, order_payload)
-    except Exception as process_err:
-        state.logger.error('/api/orchestrate process_order failed: %s', process_err)
-        process_response = None
-        process_warning = f'process_order failed: {str(process_err)}'
-
     @stream_with_context
     def generate():
         rounds = []
+        round_responses = []
         message_counter = 0
+        current_order = order
 
         yield sse_event('phase_change', {'phase': 'order-broadcast'})
-        if process_warning:
-            yield sse_event('callback_message', {'message': f'Backend warning: {process_warning}'})
         time.sleep(0.4)
 
         for round_number in [1, 2, 3]:
             yield sse_event('phase_change', {'phase': f'round-{round_number}'})
             time.sleep(0.2)
 
+            if round_number > 1:
+                current_order = derive_revised_order(current_order, round_responses[-1], round_number)
+
+            current_payload = build_process_payload_from_order(current_order, order_payload)
+            try:
+                process_response, process_warning = run_process_order_for_synk(current_order, current_payload)
+            except Exception as process_err:
+                state.logger.error('/api/orchestrate round %s process_order failed: %s', round_number, process_err)
+                process_response = None
+                process_warning = f'process_order failed: {str(process_err)}'
+
+            if process_warning:
+                yield sse_event('callback_message', {'message': f'Backend warning: {process_warning}'})
+
             previous_round = rounds[-1] if rounds else None
-            round_summary = build_round_summary(order, round_number, previous_round)
-            round_summary = apply_live_agent_results_to_round(round_summary, process_response)
+            round_summary = build_actual_round_summary(current_order, round_number, process_response, previous_round)
             rounds.append(round_summary)
+            round_responses.append(process_response)
+
+            # Stop immediately once the live manager reaches consensus for the round.
+            # Do not rely only on the synthesized round summary because UI-facing
+            # transformations should not control orchestration flow.
+            round_has_consensus = bool(
+                round_summary.get('converged')
+                or (process_response or {}).get('consensus_reached')
+                or (process_response or {}).get('status') == 'SUCCESS'
+            )
+            round_summary['converged'] = round_has_consensus
 
             round_messages, message_counter = build_round_messages(round_number, message_counter, round_summary)
             for message in round_messages:
@@ -148,13 +167,16 @@ def orchestrate():
             yield sse_event('round_complete', {'roundSummary': round_summary})
             time.sleep(0.25)
 
-            if round_summary.get('converged'):
+            if round_has_consensus:
+                state.logger.info('/api/orchestrate stopped after round %s because consensus was reached.', round_number)
                 break
 
         yield sse_event('phase_change', {'phase': 'consensus'})
         time.sleep(0.2)
 
-        consensus_payload = synthesize_consensus(order, rounds, process_response)
+        final_order = rounds[-1].get('order_context') if rounds else order
+        final_process_response = round_responses[-1] if round_responses else None
+        consensus_payload = synthesize_consensus(final_order, rounds, final_process_response)
         yield sse_event('consensus_reached', {'consensus': consensus_payload})
         time.sleep(0.25)
 

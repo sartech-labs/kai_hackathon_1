@@ -55,7 +55,7 @@ def normalize_priority(priority):
 
 def build_synk_order(payload):
     timestamp_suffix = str(int(time.time() * 1000))[-3:]
-    return {
+    order = {
         'id': payload.get('id') or payload.get('order_id') or f'ORD-RUSH-{timestamp_suffix}',
         'customer': payload.get('customer', 'Acme Corp'),
         'product': payload.get('product') or payload.get('product_sku', 'PMP-STD-100'),
@@ -63,7 +63,21 @@ def build_synk_order(payload):
         'requestedPrice': safe_float(payload.get('requestedPrice', payload.get('requested_price')), 10.0),
         'requestedDeliveryDays': safe_int(payload.get('requestedDeliveryDays', payload.get('requested_delivery_days')), 18),
         'priority': str(payload.get('priority', 'rush')).lower(),
+        'customerLocation': resolve_customer_location(payload),
     }
+    incoming_context = dict(payload.get('negotiationContext') or payload.get('negotiation_context') or {})
+    order['negotiationContext'] = {
+        **incoming_context,
+        'original_requested_price': safe_float(incoming_context.get('original_requested_price'), order['requestedPrice']),
+        'original_requested_delivery_days': safe_int(
+            incoming_context.get('original_requested_delivery_days'),
+            order['requestedDeliveryDays'],
+        ),
+        'original_quantity': safe_int(incoming_context.get('original_quantity'), order['quantity']),
+        'round_number': safe_int(incoming_context.get('round_number'), 1),
+        'round_goal': incoming_context.get('round_goal', 'Evaluate the customer request as submitted.'),
+    }
+    return order
 
 
 def resolve_customer_location(payload):
@@ -79,6 +93,31 @@ def resolve_customer_location(payload):
     return 'national'
 
 
+def build_process_payload_from_order(order, base_payload=None):
+    base_payload = dict(base_payload or {})
+    payload = {
+        'id': order.get('id'),
+        'customer': order.get('customer'),
+        'product': order.get('product'),
+        'quantity': safe_int(order.get('quantity'), 1),
+        'requestedPrice': safe_float(order.get('requestedPrice'), 10.0),
+        'requestedDeliveryDays': safe_int(order.get('requestedDeliveryDays'), 18),
+        'priority': order.get('priority', 'normal'),
+        'customer_location': order.get('customerLocation') or base_payload.get('customer_location'),
+        'negotiationContext': dict(order.get('negotiationContext') or {}),
+    }
+    if not payload['customer_location']:
+        payload['customer_location'] = resolve_customer_location(base_payload or payload)
+    return payload
+
+
+def get_blocking_agents(process_response):
+    agent_responses = (process_response or {}).get('agent_responses') or {}
+    if not isinstance(agent_responses, dict):
+        return []
+    return [agent_id for agent_id in AGENT_IDS if not bool((agent_responses.get(agent_id) or {}).get('can_proceed', False))]
+
+
 def run_process_order_for_synk(order, payload):
     order_request = OrderRequest(
         order_id=order['id'],
@@ -89,9 +128,10 @@ def run_process_order_for_synk(order, payload):
         customer=order.get('customer', 'Acme Corp'),
         requested_price=safe_float(order.get('requestedPrice'), 10.0),
         requested_delivery_days=safe_int(order.get('requestedDeliveryDays'), 18),
+        negotiation_context=dict(payload.get('negotiationContext') or payload.get('negotiation_context') or order.get('negotiationContext') or {}),
     )
 
-    use_mock_process_order = str(os.getenv('BACKEND_USE_MOCK_PROCESS_ORDER', 'true')).strip().lower() in {
+    use_mock_process_order = str(os.getenv('BACKEND_USE_MOCK_PROCESS_ORDER', 'false')).strip().lower() in {
         '1',
         'true',
         'yes',
@@ -132,10 +172,22 @@ def run_process_order_for_synk(order, payload):
         return response, 'Using mock process_order response (live agent pipeline unavailable).'
 
     if state.manager is None:
-        response = build_mock_process_order_response(order_request)
-        return response, 'LangGraph manager unavailable; using mock process_order response.'
+        return {
+            'status': 'FAILURE',
+            'order_id': order_request.order_id,
+            'product_sku': order_request.product_sku,
+            'quantity': int(order_request.quantity),
+            'customer_location': order_request.customer_location,
+            'message': 'LangGraph manager unavailable. Enable a valid OpenAI key and disable mock mode only when manager initialization succeeds.',
+            'consensus_reached': False,
+            'agent_responses': {},
+            'mock_mode': False,
+            'timestamp': datetime.utcnow().isoformat(),
+        }, 'LangGraph manager unavailable; no mock fallback because BACKEND_USE_MOCK_PROCESS_ORDER=false.'
 
     response = state.manager.process_order(order_request)
+    response['mock_mode'] = False
+    response['live_agents'] = AGENT_IDS
     return response, None
 
 
@@ -149,6 +201,7 @@ def _build_live_order_dict(order_request):
         'customer': order_request.customer,
         'requested_price': order_request.requested_price,
         'requested_delivery_days': order_request.requested_delivery_days,
+        'negotiation_context': order_request.negotiation_context or {},
     }
 
 
@@ -255,12 +308,12 @@ def mock_agent_proposal(agent_id, order, round_number, previous_round=None):
         target_days = requested_days
         margin = 12.4
     elif round_number == 2:
-        target_price = max(10.8, requested_price)
-        target_days = requested_days + 1
+        target_price = requested_price
+        target_days = requested_days
         margin = 17.2
     else:
-        target_price = max(10.8, requested_price)
-        target_days = requested_days + 1
+        target_price = requested_price
+        target_days = requested_days
         margin = 20.6
 
     previous_round_ref = previous_round.get('round') if isinstance(previous_round, dict) else None
@@ -311,25 +364,27 @@ def mock_agent_proposal(agent_id, order, round_number, previous_round=None):
 def build_round_summary(order, round_number, previous_round=None):
     requested_price = safe_float(order.get('requestedPrice'), 10.0)
     requested_days = safe_int(order.get('requestedDeliveryDays'), 18)
+    negotiation_context = order.get('negotiationContext') or {}
+    strategy_notes = list(negotiation_context.get('strategy_notes') or [])
 
     if round_number == 1:
         price = requested_price
         delivery_days = requested_days
         margin = 12.4
-        overtime_hours = 12
+        overtime_hours = 4
         converged = False
     elif round_number == 2:
-        price = max(10.8, requested_price)
-        delivery_days = requested_days + 1
-        margin = 17.2
-        overtime_hours = 8
+        price = requested_price
+        delivery_days = requested_days
+        margin = max(17.2, safe_float(previous_round.get('margin') if previous_round else 17.2, 17.2))
+        overtime_hours = 8 if negotiation_context.get('production_strategy') else 6
         converged = False
     else:
-        price = max(10.8, requested_price)
-        delivery_days = requested_days + 1
-        margin = 20.6
-        overtime_hours = 8
-        converged = True
+        price = requested_price
+        delivery_days = requested_days
+        margin = max(20.6, safe_float(previous_round.get('margin') if previous_round else 20.6, 20.6))
+        overtime_hours = 10 if negotiation_context.get('production_strategy') else 6
+        converged = False
 
     proposals = [
         mock_agent_proposal(agent_id, order, round_number, previous_round)
@@ -346,6 +401,13 @@ def build_round_summary(order, round_number, previous_round=None):
         'proposals': proposals,
         'converged': converged,
         'order_context': order,
+        'strategy': {
+            'goal': negotiation_context.get('round_goal'),
+            'productionStrategy': negotiation_context.get('production_strategy'),
+            'revenueGoal': negotiation_context.get('revenue_goal'),
+            'notes': strategy_notes,
+            'blockingAgents': list(negotiation_context.get('blocking_agents') or []),
+        },
     }
 
 
@@ -636,9 +698,135 @@ def apply_live_agent_results_to_round(round_summary, process_response):
 
         round_summary['shippingMode'] = 'ground' if all_live_approved else ('express' if round_number == 2 else 'air')
         round_summary['overtimeHours'] = 6 if all_live_approved else (10 if round_number == 2 else 12)
-        round_summary['converged'] = all_live_approved
+        round_summary['converged'] = bool(process_response.get('consensus_reached', all_live_approved))
 
     return round_summary
+
+
+def build_actual_round_summary(order, round_number, process_response, previous_round=None):
+    round_summary = build_round_summary(order, round_number, previous_round)
+    round_summary = apply_live_agent_results_to_round(round_summary, process_response)
+    return round_summary
+
+
+def derive_revised_order(previous_order, process_response, round_number):
+    revised_order = dict(previous_order)
+    previous_context = dict(previous_order.get('negotiationContext') or {})
+    original_price = safe_float(previous_context.get('original_requested_price'), safe_float(previous_order.get('requestedPrice'), 10.0))
+    original_days = safe_int(
+        previous_context.get('original_requested_delivery_days'),
+        safe_int(previous_order.get('requestedDeliveryDays'), 18),
+    )
+    original_quantity = safe_int(previous_context.get('original_quantity'), safe_int(previous_order.get('quantity'), 1))
+    blockers = get_blocking_agents(process_response)
+
+    agent_responses = (process_response or {}).get('agent_responses') or {}
+    procurement_result = agent_responses.get('procurement') or {}
+    production_result = agent_responses.get('production') or {}
+    logistics_result = agent_responses.get('logistics') or {}
+    finance_result = agent_responses.get('finance') or {}
+    sales_result = agent_responses.get('sales') or {}
+
+    production_days = safe_int(production_result.get('production_days'), safe_int(previous_order.get('requestedDeliveryDays'), original_days))
+    logistics_days = extract_delivery_days_from_process_response({'delivery_date': logistics_result.get('delivery_date')})
+    if logistics_days is None:
+        logistics_days = max(1, production_days + 2)
+
+    finance_floor = safe_float(finance_result.get('final_price'), safe_float(previous_order.get('requestedPrice'), original_price))
+    requested_price = safe_float(previous_order.get('requestedPrice'), original_price)
+    requested_days = safe_int(previous_order.get('requestedDeliveryDays'), original_days)
+    requested_quantity = safe_int(previous_order.get('quantity'), original_quantity)
+    feasible_quantity = max(0, _procurement_feasible_quantity(previous_order, procurement_result))
+
+    customer_profile = state.inventory_manager.get_customer_profile(previous_order.get('customer', '')) if state.inventory_manager else {}
+    max_price_uplift = float(customer_profile.get('max_price_uplift', 0.20))
+    delivery_buffer = int(customer_profile.get('acceptable_delivery_buffer_days', 2))
+    max_customer_price = round(original_price * (1 + max_price_uplift), 2)
+    primary_lead_with_buffer = int(state.inventory_manager.procurement_policy.get('primary_lead_time_days', 10)) + 2 if state.inventory_manager else 12
+
+    target_price = requested_price
+    target_days = max(requested_days, production_days, logistics_days)
+    target_quantity = requested_quantity
+    priority = revised_order.get('priority', 'rush')
+    production_strategy = 'baseline'
+    strategy_notes = []
+    round_goal = 'Resolve blockers while preserving full order value.'
+    revenue_goal = 'Protect margin while improving the customer offer.'
+    revenue_goal_mode = 'baseline'
+
+    if round_number == 2:
+        if 'procurement' in blockers:
+            target_days = max(target_days, primary_lead_with_buffer)
+            strategy_notes.append(
+                'Procurement is asked to source missing material externally instead of limiting the decision to current stock.'
+            )
+        if 'production' in blockers or 'logistics' in blockers:
+            production_strategy = 'preempt_and_overtime'
+            priority = 'critical'
+            target_days = max(original_days, min(target_days, max(production_days, logistics_days)))
+            target_price = max(target_price, finance_floor * 1.05, original_price * 1.08)
+            revenue_goal = 'Use expedited premium to offset preemption and overtime while keeping the full order.'
+            revenue_goal_mode = 'premium_recovery'
+            strategy_notes.append(
+                'Production is asked to evaluate stopping lower-priority work, reallocating slots, and running overtime for this order.'
+            )
+        if 'finance' in blockers:
+            target_price = max(target_price, finance_floor, original_price * 1.05)
+            revenue_goal_mode = revenue_goal_mode if revenue_goal_mode != 'baseline' else 'floor_recovery'
+            strategy_notes.append('Finance is asked to recover the margin floor through a revised counter-offer.')
+        if 'sales' in blockers:
+            target_price = min(max(target_price, finance_floor), max_customer_price)
+            target_days = max(target_days, original_days + delivery_buffer)
+            strategy_notes.append('Sales is asked to test a premium-but-defensible offer against customer tolerance.')
+        if not strategy_notes:
+            strategy_notes.append('Round 2 keeps the order intact and validates whether a premium rush plan is acceptable.')
+    else:
+        round_goal = 'Present the final viable offer with explicit revenue protection.'
+        revenue_goal = 'Maximize contribution margin on the final feasible deal.'
+        revenue_goal_mode = 'margin_expansion'
+        production_strategy = 'phased_split_delivery'
+        priority = 'critical'
+        target_days = max(target_days, original_days + max(3, delivery_buffer + 1), production_days + 2)
+        target_price = max(target_price, finance_floor * 1.08, original_price * 1.10)
+        strategy_notes.append('Final round asks operations to lock committed capacity and protect the account margin.')
+
+        if 'procurement' in blockers and feasible_quantity > 0:
+            target_quantity = min(requested_quantity, feasible_quantity)
+            if target_quantity < requested_quantity:
+                strategy_notes.append(
+                    f'Immediate allocation is reduced to {target_quantity} units to avoid a full rejection while supply is replenished.'
+                )
+        if 'production' in blockers:
+            target_days = max(target_days, production_days + 3)
+            strategy_notes.append('Production is asked for a phased delivery schedule instead of a single completion date.')
+        if 'sales' in blockers:
+            target_price = min(target_price, max_customer_price)
+            target_days = max(target_days, original_days + delivery_buffer + 1)
+            strategy_notes.append('Price is capped at customer tolerance; any further improvement must come from schedule, not discounting.')
+        if not strategy_notes:
+            strategy_notes.append('Final round converts aligned agent positions into a firm customer-ready proposal.')
+
+    revised_order['quantity'] = max(1, target_quantity)
+    revised_order['requestedPrice'] = round(target_price, 2)
+    revised_order['requestedDeliveryDays'] = int(target_days)
+    revised_order['priority'] = priority
+    revised_order['customerLocation'] = previous_order.get('customerLocation')
+    revised_order['negotiationContext'] = {
+        **previous_context,
+        'original_requested_price': original_price,
+        'original_requested_delivery_days': original_days,
+        'original_quantity': original_quantity,
+        'round_number': round_number,
+        'round_goal': round_goal,
+        'revenue_goal': revenue_goal,
+        'revenue_goal_mode': revenue_goal_mode,
+        'production_strategy': production_strategy,
+        'blocking_agents': blockers,
+        'strategy_notes': strategy_notes,
+        'previous_rejection_reason': (process_response or {}).get('message'),
+        'customer_price_ceiling': max_customer_price,
+    }
+    return revised_order
 
 
 def extract_delivery_days_from_process_response(process_response):
@@ -727,8 +915,12 @@ def build_round_messages(round_number, id_counter, round_summary=None):
         return [], id_counter
 
     blockers = [proposal for proposal in round_summary.get('proposals', []) if not proposal.get('approved')]
+    strategy = round_summary.get('strategy') or {}
+    strategy_goal = strategy.get('goal')
     if round_number == 1:
         directive = 'Broadcasting order to all agents. Complete initial feasibility checks.'
+    elif strategy_goal:
+        directive = strategy_goal
     elif blockers:
         directive = 'Blocking agents must counter with feasible terms. Supporting agents validate revised options.'
     else:

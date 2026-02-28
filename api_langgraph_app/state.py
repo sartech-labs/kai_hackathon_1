@@ -29,8 +29,8 @@ def _is_truthy(value):
 
 
 try:
-    use_mock_process_order = _is_truthy(os.getenv('BACKEND_USE_MOCK_PROCESS_ORDER', 'true'))
-    use_real_agent_pipeline = _is_truthy(os.getenv('BACKEND_USE_REAL_AGENT_PIPELINE', 'true'))
+    use_mock_process_order = _is_truthy(os.getenv('BACKEND_USE_MOCK_PROCESS_ORDER', 'false'))
+    use_real_agent_pipeline = _is_truthy(os.getenv('BACKEND_USE_REAL_AGENT_PIPELINE', 'false'))
     inventory_manager = InventoryManager('data/inventory.json', 'data/materials.json')
 
     api_key = os.getenv('OPEN_AI_API_KEY')

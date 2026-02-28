@@ -17,6 +17,7 @@ class OrderRequest:
     customer: str = 'Acme Corp'
     requested_price: float = 10.0
     requested_delivery_days: int = 18
+    negotiation_context: Optional[dict] = None
 
 
 class LLMAgentState(TypedDict):
