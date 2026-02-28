@@ -1,7 +1,7 @@
 "use client"
 
 import Image from "next/image"
-import { Phone, PhoneOff, PhoneIncoming, Plus, CheckCircle2, XCircle, Package, Clock } from "lucide-react"
+import { CheckCircle2, Clock, Package, Phone, Plus, XCircle } from "lucide-react"
 import type { DemoPhase, Order, ConsensusResult } from "@/lib/synk/types"
 import type { CallLog } from "@/app/page"
 import { VoiceWaveform } from "./voice-waveform"
@@ -14,6 +14,9 @@ import { APPROVED_ORDER_EXAMPLE, DEFAULT_ORDER } from "@/lib/synk/scenario"
 interface VoiceAgentPanelProps {
   phase: DemoPhase
   order: Order
+  voiceOrderReady: boolean
+  voiceStatusMessage: string | null
+  liveAudioStatus: string | null
   transcript: TranscriptMessage[]
   consensus: ConsensusResult | null
   callHistory: CallLog[]
@@ -29,8 +32,18 @@ function formatTime(ts: number) {
 }
 
 export function VoiceAgentPanel({
-  phase, order, transcript, consensus, callHistory,
-  onAcceptCall, onOrderChange, onSubmitOrder, onNewCall,
+  phase,
+  order,
+  voiceOrderReady,
+  voiceStatusMessage,
+  liveAudioStatus,
+  transcript,
+  consensus,
+  callHistory,
+  onAcceptCall,
+  onOrderChange,
+  onSubmitOrder,
+  onNewCall,
 }: VoiceAgentPanelProps) {
   const isCallActive = phase === "active-call" || phase === "callback"
   const isProcessing = ["order-broadcast", "round-1", "round-2", "round-3", "consensus"].includes(phase)
@@ -39,7 +52,6 @@ export function VoiceAgentPanel({
 
   return (
     <div className="flex flex-col h-full bg-card relative">
-      {/* Panel Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-border">
         <div className="flex items-center gap-3">
           <Image src="/agents/voice-agent.jpg" alt="Voice Agent" width={32} height={32} className="rounded-full ring-2 ring-primary/20" />
@@ -69,13 +81,10 @@ export function VoiceAgentPanel({
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* ── Idle State -- ElevenLabs style ── */}
         {phase === "idle" && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex flex-col items-center justify-center gap-8 px-6 py-10 shrink-0">
-              {/* Holographic orb avatar */}
               <div className="relative">
                 <div className="w-36 h-36 rounded-full bg-gradient-to-br from-indigo-100 via-purple-50 to-blue-100 flex items-center justify-center shadow-xl shadow-indigo-100/50">
                   <div className="w-28 h-28 rounded-full overflow-hidden ring-4 ring-white shadow-inner">
@@ -92,12 +101,11 @@ export function VoiceAgentPanel({
                 </div>
               </div>
               <div className="text-center">
-                <p className="text-base font-semibold text-foreground">Start a call</p>
-                <p className="text-sm text-muted-foreground mt-1">Simulate a customer rush order call</p>
+                <p className="text-base font-semibold text-foreground">Start system</p>
+                <p className="text-sm text-muted-foreground mt-1">Trigger outbound voice capture and prepare the agent-network order</p>
               </div>
             </div>
 
-            {/* Call History Inbox */}
             {callHistory.length > 0 && (
               <div className="flex-1 min-h-0 border-t border-border">
                 <div className="px-4 py-2.5">
@@ -105,7 +113,7 @@ export function VoiceAgentPanel({
                 </div>
                 <ScrollArea className="h-full px-2">
                   <div className="space-y-0.5 pb-4">
-                    {callHistory.map(log => (
+                    {callHistory.map((log) => (
                       <CallLogRow key={log.id} log={log} />
                     ))}
                   </div>
@@ -115,44 +123,19 @@ export function VoiceAgentPanel({
           </div>
         )}
 
-        {/* ── Incoming Call ── */}
-        {phase === "incoming-call" && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
-            <div className="relative">
-              <div className="w-28 h-28 rounded-full bg-gradient-to-br from-emerald-100 to-emerald-50 flex items-center justify-center animate-ring-pulse">
-                <div className="w-20 h-20 rounded-full overflow-hidden ring-2 ring-emerald-200">
-                  <Image src="/agents/voice-agent.jpg" alt="Voice Agent" width={80} height={80} className="object-cover w-full h-full" />
-                </div>
-              </div>
-              <div className="absolute inset-0 rounded-full border-2 border-emerald-300/40 animate-ping" />
-            </div>
-            <div className="text-center">
-              <p className="text-lg font-semibold text-foreground">{order.customer}</p>
-              <p className="text-sm text-muted-foreground mt-0.5">Incoming call</p>
-              <p className="text-xs font-mono text-muted-foreground mt-1">+1 (555) 234-7890</p>
-            </div>
-            <Button onClick={onAcceptCall} className="bg-emerald-500 hover:bg-emerald-600 text-white font-medium px-8 rounded-full">
-              <Phone className="w-4 h-4 mr-2" /> Accept Call
-            </Button>
-          </div>
-        )}
-
-        {/* ── Active Call / Processing / Callback ── */}
         {(isCallActive || isProcessing) && !isDone && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Waveform bar */}
             {(isCallActive || isCallback) && (
               <div className="px-5 py-3 border-b border-border bg-secondary/30">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                    {isCallback ? "Calling back" : "Active call"} -- {order.customer}
+                    {isCallback ? "Calling back" : "System active"} -- {order.customer}
                   </span>
                 </div>
                 <VoiceWaveform active={isCallActive} />
               </div>
             )}
 
-            {/* Processing indicator */}
             {isProcessing && (
               <div className="px-5 py-3 border-b border-border bg-primary/[0.03]">
                 <div className="flex items-center gap-3">
@@ -162,18 +145,22 @@ export function VoiceAgentPanel({
                   <div>
                     <p className="text-xs font-semibold text-foreground">Running Agent Orchestration</p>
                     <p className="text-[11px] text-muted-foreground">
-                      {phase === "order-broadcast" ? "Broadcasting order..." : phase === "consensus" ? "Building consensus..."
-                        : `Negotiation ${phase.replace("round-", "Round ")} in progress...`}
+                      {phase === "order-broadcast" ? "Broadcasting order..." : phase === "consensus" ? "Building consensus..." : `Negotiation ${phase.replace("round-", "Round ")} in progress...`}
                     </p>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Order Card (shown during active call) */}
             {phase === "active-call" && (
               <div className="px-5 py-3 border-b border-border">
                 <OrderCard order={order} editable onOrderChange={onOrderChange} />
+                <div className="mt-3 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+                  {voiceStatusMessage || (voiceOrderReady ? "Order is ready for submission." : "Waiting for outbound voice result.")}
+                </div>
+                <div className="mt-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+                  {liveAudioStatus || "Live conversation audio not connected yet."}
+                </div>
                 <div className="mt-3 flex items-center gap-2">
                   <Button
                     type="button"
@@ -194,36 +181,33 @@ export function VoiceAgentPanel({
                     Approved Example
                   </Button>
                 </div>
-                <Button onClick={onSubmitOrder} className="w-full mt-3 rounded-full font-medium" size="sm">
-                  Submit to Agent Network
+                <Button
+                  onClick={onSubmitOrder}
+                  disabled={!voiceOrderReady}
+                  className="w-full mt-3 rounded-full font-medium"
+                  size="sm"
+                >
+                  {voiceOrderReady ? "Submit to Agent Network" : "Awaiting Voice Result"}
                 </Button>
               </div>
             )}
 
-            {/* Transcript */}
             <div className="flex-1 overflow-hidden p-5">
               <VoiceTranscript messages={transcript} />
             </div>
           </div>
         )}
 
-        {/* ── Done state: ready for new call + call history inbox ── */}
         {isDone && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Outcome banner */}
             <div className="px-5 py-4 border-b border-border">
               <div className={`flex items-center gap-2.5 px-4 py-3 rounded-xl ${
                 consensus?.approved ? "bg-emerald-50 border border-emerald-200" : "bg-red-50 border border-red-200"
               }`}>
-                {consensus?.approved
-                  ? <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  : <XCircle className="w-4 h-4 text-red-600" />
-                }
+                {consensus?.approved ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-red-600" />}
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium text-foreground">
-                    {consensus?.approved
-                      ? "Call ended -- Order Approved"
-                      : "Customer informed -- Order Rejected"}
+                    {consensus?.approved ? "Call ended -- Order Approved" : "Customer informed -- Order Rejected"}
                   </span>
                   {consensus?.approved && (
                     <span className="block text-xs text-muted-foreground mt-0.5">
@@ -234,21 +218,19 @@ export function VoiceAgentPanel({
               </div>
             </div>
 
-            {/* Ready for new call */}
             <div className="flex flex-col items-center gap-4 px-6 py-6 shrink-0">
               <div className="w-20 h-20 rounded-full bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center">
                 <div className="w-14 h-14 rounded-full overflow-hidden ring-2 ring-white shadow-md">
                   <Image src="/agents/voice-agent.jpg" alt="Voice Agent" width={56} height={56} className="object-cover w-full h-full" />
                 </div>
               </div>
-              <p className="text-sm font-medium text-foreground">Agent ready for next call</p>
+              <p className="text-sm font-medium text-foreground">Agent ready for next run</p>
               <Button onClick={onNewCall} className="rounded-full font-medium px-6" size="sm">
                 <Plus className="w-3.5 h-3.5 mr-1.5" />
-                New Call
+                New Run
               </Button>
             </div>
 
-            {/* Call History Inbox */}
             {callHistory.length > 0 && (
               <div className="flex-1 min-h-0 border-t border-border">
                 <div className="px-4 py-2.5">
@@ -256,7 +238,7 @@ export function VoiceAgentPanel({
                 </div>
                 <ScrollArea className="h-full px-2">
                   <div className="space-y-0.5 pb-4">
-                    {callHistory.map(log => (
+                    {callHistory.map((log) => (
                       <CallLogRow key={log.id} log={log} />
                     ))}
                   </div>
@@ -267,7 +249,6 @@ export function VoiceAgentPanel({
         )}
       </div>
 
-      {/* Callback Popup -- ElevenLabs style floating card */}
       {isCallback && (
         <div className="absolute bottom-6 right-6 z-50 w-72 animate-pop-in">
           <div className="bg-card rounded-2xl shadow-2xl shadow-black/10 border border-border overflow-hidden">
@@ -293,28 +274,18 @@ export function VoiceAgentPanel({
   )
 }
 
-// ─── Call History Row (Inbox Style) ──────────────────────────
 function CallLogRow({ log }: { log: CallLog }) {
   const isApproved = log.outcome === "approved"
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-secondary/50 transition-colors group cursor-default">
-      {/* Status indicator */}
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-        isApproved ? "bg-emerald-50" : "bg-red-50"
-      }`}>
-        {isApproved
-          ? <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-          : <XCircle className="w-4 h-4 text-red-500" />
-        }
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isApproved ? "bg-emerald-50" : "bg-red-50"}`}>
+        {isApproved ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-red-500" />}
       </div>
 
-      {/* Details */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-foreground truncate">{log.customer}</span>
-          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
-            isApproved ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"
-          }`}>
+          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${isApproved ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
             {isApproved ? "APPROVED" : "REJECTED"}
           </span>
         </div>
@@ -325,7 +296,6 @@ function CallLogRow({ log }: { log: CallLog }) {
         </div>
       </div>
 
-      {/* Timestamp */}
       <div className="shrink-0 text-right">
         <span className="text-[10px] text-muted-foreground flex items-center gap-1">
           <Clock className="w-2.5 h-2.5" />
