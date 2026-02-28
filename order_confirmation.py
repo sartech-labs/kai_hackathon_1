@@ -1,5 +1,6 @@
 import requests
 from dotenv import load_dotenv
+import os
 load_dotenv()
 
 VAPI_API_KEY = os.environ.get('VAPI_API_KEY')
