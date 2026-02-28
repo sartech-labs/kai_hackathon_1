@@ -159,7 +159,7 @@ def build_decision_callback_script(order: dict[str, Any], consensus: dict[str, A
         final_price = _safe_float(consensus.get('finalPrice'), 0.0) or 0.0
         final_days = _safe_int(consensus.get('finalDeliveryDays'), 0) or 0
         first_message = (
-            f'Hello {customer}, this is SYNK calling with an update on order {order_id}. '
+            f'Hello {customer}, this is Sagar from Aqua Pumps private limited with an update on order {order_id}. '
             f'Your order for {quantity} units of {product} is approved at ${final_price:.2f} per unit '
             f'with delivery in {final_days} days.'
         )
@@ -173,7 +173,7 @@ def build_decision_callback_script(order: dict[str, Any], consensus: dict[str, A
     else:
         rejection_reason = str(consensus.get('rejectionReason') or consensus.get('summary') or 'we could not approve the requested terms').strip()
         first_message = (
-            f'Hello {customer}, this is SYNK calling with an update on order {order_id}. '
+            f'Hello {customer}, this is Sagar from Aqua Pumps private limited with an update on order {order_id}. '
             f'We could not approve the request for {quantity} units of {product} under the submitted terms. '
             f'The main reason is: {rejection_reason}.'
         )
