@@ -10,6 +10,16 @@ export const DEFAULT_ORDER: Order = {
   priority: "rush",
 }
 
+export const APPROVED_ORDER_EXAMPLE: Order = {
+  id: "ORD-APPROVE-001",
+  customer: "Acme Corp",
+  product: "PMP-STD-100",
+  quantity: 50,
+  requestedPrice: 22.0,
+  requestedDeliveryDays: 18,
+  priority: "rush",
+}
+
 export const VOICE_SCRIPT = {
   incomingCall: {
     caller: "Acme Corp - Procurement Dept",

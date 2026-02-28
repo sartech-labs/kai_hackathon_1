@@ -9,6 +9,7 @@ import { VoiceTranscript, type TranscriptMessage } from "./voice-transcript"
 import { OrderCard } from "./order-card"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { APPROVED_ORDER_EXAMPLE, DEFAULT_ORDER } from "@/lib/synk/scenario"
 
 interface VoiceAgentPanelProps {
   phase: DemoPhase
@@ -173,6 +174,26 @@ export function VoiceAgentPanel({
             {phase === "active-call" && (
               <div className="px-5 py-3 border-b border-border">
                 <OrderCard order={order} editable onOrderChange={onOrderChange} />
+                <div className="mt-3 flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full text-xs"
+                    onClick={() => onOrderChange({ ...DEFAULT_ORDER })}
+                  >
+                    Rejected Example
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full text-xs"
+                    onClick={() => onOrderChange({ ...APPROVED_ORDER_EXAMPLE })}
+                  >
+                    Approved Example
+                  </Button>
+                </div>
                 <Button onClick={onSubmitOrder} className="w-full mt-3 rounded-full font-medium" size="sm">
                   Submit to Agent Network
                 </Button>
