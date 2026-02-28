@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   GripVertical,
 } from "lucide-react"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 const AGENT_AVATARS: Record<AgentId | "orchestrator", string> = {
   production: "/agents/production.jpg",
@@ -57,6 +58,7 @@ type LayoutPosition = { x: number; y: number }
 type DragState =
   | { type: "node"; id: LayoutNodeId }
   | { type: "callout"; id: AgentId; startClientX: number; startClientY: number; startOffsetX: number; startOffsetY: number }
+  | { type: "log-panel"; startClientY: number; startHeight: number }
 
 const AGENT_LAYOUTS: AgentLayoutMeta[] = [
   { id: "production", calloutSide: "right" },
@@ -301,6 +303,7 @@ export function OrchestrationPanel({
   const [calloutOffsets, setCalloutOffsets] = useState<Record<AgentId, { x: number; y: number }>>(DEFAULT_CALLOUT_OFFSETS)
   const [draggingNodeId, setDraggingNodeId] = useState<LayoutNodeId | null>(null)
   const [draggingCalloutId, setDraggingCalloutId] = useState<AgentId | null>(null)
+  const [logPanelHeight, setLogPanelHeight] = useState(108)
 
   const isIdle = phase === "idle" || phase === "incoming-call" || phase === "active-call"
   const isNegotiating = phase.startsWith("round-") || phase === "order-broadcast"
@@ -324,6 +327,10 @@ export function OrchestrationPanel({
     }
     return map
   }, [allProposals, selectedRound])
+
+  const roundMessages = useMemo(() => {
+    return agentMessages.filter((message) => message.round === selectedRound)
+  }, [agentMessages, selectedRound])
 
   const maxRound = Math.max(currentRound, rounds.length)
 
@@ -380,6 +387,13 @@ export function OrchestrationPanel({
         return
       }
 
+      if (dragStateRef.current.type === "log-panel") {
+        const dragState = dragStateRef.current
+        const deltaY = dragState.startClientY - event.clientY
+        setLogPanelHeight(Math.min(240, Math.max(72, dragState.startHeight + deltaY)))
+        return
+      }
+
       const dragState = dragStateRef.current
       const deltaX = event.clientX - dragState.startClientX
       const deltaY = event.clientY - dragState.startClientY
@@ -433,6 +447,20 @@ export function OrchestrationPanel({
     document.body.style.cursor = "grabbing"
     document.body.style.userSelect = "none"
   }, [calloutOffsets])
+
+  const startLogPanelDragging = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    dragStateRef.current = {
+      type: "log-panel",
+      startClientY: event.clientY,
+      startHeight: logPanelHeight,
+    }
+    setDraggingNodeId(null)
+    setDraggingCalloutId(null)
+    document.body.style.cursor = "ns-resize"
+    document.body.style.userSelect = "none"
+  }, [logPanelHeight])
 
   const px = (layout: LayoutPosition) => ({
     x: (layout.x / 100) * dims.w,
@@ -681,6 +709,51 @@ export function OrchestrationPanel({
           </div>
         )}
       </div>
+
+      {roundMessages.length > 0 && selectedRound > 0 && (
+        <div className="shrink-0 border-t border-border bg-card" style={{ height: logPanelHeight }}>
+          <div
+            className="flex h-4 cursor-row-resize items-center justify-center border-b border-border/70 bg-secondary/30"
+            onPointerDown={startLogPanelDragging}
+            title="Drag to resize logs"
+          >
+            <div className="h-1 w-16 rounded-full bg-muted-foreground/30" />
+          </div>
+          <ScrollArea className="h-[calc(100%-16px)]">
+            <div className="space-y-1 px-4 py-2">
+              {roundMessages.map((msg) => {
+                const fromConfig = AGENT_CONFIGS.find((agent) => agent.id === msg.from)
+                const color = fromConfig?.color || "#6366f1"
+                return (
+                  <div key={msg.id} className="flex items-start gap-2 text-[10px]">
+                    <div className="mt-0.5 h-4 w-4 shrink-0 overflow-hidden rounded-full">
+                      <Image
+                        src={AGENT_AVATARS[msg.from as AgentId] || AGENT_AVATARS.orchestrator}
+                        alt={String(msg.from)}
+                        width={16}
+                        height={16}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="font-bold" style={{ color }}>
+                        {fromConfig?.name || "Orchestrator"}
+                      </span>
+                      <span
+                        className="ml-1.5 rounded-full px-1.5 py-0.5 text-[8px] font-bold"
+                        style={{ backgroundColor: `${color}10`, color }}
+                      >
+                        {msg.type.toUpperCase()}
+                      </span>
+                      <p className="text-muted-foreground">{msg.message}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </ScrollArea>
+        </div>
+      )}
     </div>
   )
 }

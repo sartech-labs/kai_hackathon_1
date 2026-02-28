@@ -168,14 +168,8 @@ export function VoiceAgentPanel({
             {showOrderSummary && (
               <div className="px-5 py-3 border-b border-border">
                 <OrderCard order={order} editable={isOrderEditable} onOrderChange={isOrderEditable ? onOrderChange : undefined} />
-                <div className="mt-3 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-                  {orderStatusText}
-                </div>
                 {phase === "active-call" && (
                   <>
-                    <div className="mt-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-                      {liveAudioStatus || "Live conversation audio not connected yet."}
-                    </div>
                     <div className="mt-3 flex items-center gap-2">
                       <Button
                         type="button"
@@ -219,9 +213,6 @@ export function VoiceAgentPanel({
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="px-5 py-4 border-b border-border">
               <OrderCard order={order} />
-              <div className="mt-3 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-                {orderStatusText}
-              </div>
             </div>
 
             <div className="px-5 py-4 border-b border-border">
