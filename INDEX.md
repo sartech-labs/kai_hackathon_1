@@ -168,10 +168,10 @@ REQUEST → MANAGER AGENT
 → See [config.py](config.py) for all parameters
 
 ### "I want detailed technical info"
-→ [DOCUMENTATION.md](DOCUMENTATION.md) for complete reference
+→ [documentation.md](documentation.md) for complete reference
 
 ### "I want to understand the design"
-→ [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) explains architecture & choices
+→ [implementation_summary.md](implementation_summary.md) explains architecture & choices
 
 ---
 
